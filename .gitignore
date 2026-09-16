@@ -1,0 +1,6 @@
+node_modules/
+out/
+release/
+.tmp-test/
+.spike/
+*.log
