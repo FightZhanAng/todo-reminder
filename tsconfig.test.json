@@ -12,5 +12,5 @@
     "outDir": ".tmp-test",
     "rootDir": "."
   },
-  "include": ["src/shared/**/*.ts", "scripts/core-test.ts"]
+  "include": ["src/shared/**/*.ts", "src/main/store.ts", "scripts/core-test.ts"]
 }

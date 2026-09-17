@@ -376,5 +376,73 @@ console.log('\n--- notifyText.ts ---')
   check('超过上限时标题仍是总数', many.title, '有 5 件事错过了')
 }
 
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Store } from '../src/main/store'
+
+console.log('\n--- store.ts ---')
+{
+  const dir = mkdtempSync(join(tmpdir(), 'todo-store-'))
+  const file = join(dir, 'todo-reminder.json')
+
+  // 1. 空启动
+  const s1 = new Store(file)
+  check('空启动任务列表为空', s1.tasks.length, 0)
+  check('空启动设置取默认值', s1.settings.defaultLeadMin, 15)
+  check('空启动无损坏备份', s1.corruptBackupPath, null)
+
+  // 2. 写入并重新读取
+  s1.addTask(deadline({ id: 'p1' }))
+  s1.patchSettings({ defaultLeadMin: 30 })
+  const s2 = new Store(file)
+  check('持久化后任务还在', s2.tasks.length, 1)
+  check('持久化后任务内容一致', s2.tasks[0].id, 'p1')
+  check('持久化后设置生效', s2.settings.defaultLeadMin, 30)
+
+  // 3. 新增设置项时老文件自动补默认值
+  const raw = JSON.parse(readFileSync(file, 'utf-8'))
+  delete raw.settings.allDayRemindTime
+  writeFileSync(file, JSON.stringify(raw), 'utf-8')
+  check('缺失的设置项补默认值', new Store(file).settings.allDayRemindTime, '09:00')
+
+  // 4. 单条非法任务被丢弃，其余保留
+  const raw2 = JSON.parse(readFileSync(file, 'utf-8'))
+  raw2.tasks.push({ id: 'broken' })
+  writeFileSync(file, JSON.stringify(raw2), 'utf-8')
+  const s4 = new Store(file)
+  check('非法任务被丢弃', s4.tasks.length, 1)
+  check('合法任务保留', s4.tasks[0].id, 'p1')
+
+  // 5. 文件整体损坏：备份 + 空启动，不覆盖坏文件
+  writeFileSync(file, '{ this is not json', 'utf-8')
+  const s5 = new Store(file)
+  check('损坏后以空数据启动', s5.tasks.length, 0)
+  check('损坏后有备份路径', typeof s5.corruptBackupPath, 'string')
+  check(
+    '备份文件内容就是原来的坏内容',
+    readFileSync(s5.corruptBackupPath as string, 'utf-8'),
+    '{ this is not json'
+  )
+
+  // 6. 软删除与恢复
+  const s6 = new Store(file)
+  s6.addTask(deadline({ id: 'p2' }))
+  check('软删除返回 true', s6.removeTask('p2'), true)
+  check('软删除后仍在数组里', s6.tasks.some((x) => x.id === 'p2'), true)
+  check('软删除后 deletedAt 非空', s6.tasks.find((x) => x.id === 'p2')?.deletedAt != null, true)
+  check('软删除不存在的 id 返回 false', s6.removeTask('nope'), false)
+  s6.restoreTask('p2')
+  check('恢复后 deletedAt 为 null', s6.tasks.find((x) => x.id === 'p2')?.deletedAt, null)
+
+  // 7. 更新不存在的 id
+  check('更新不存在的 id 返回 null', s6.updateTask('nope', { title: 'x' }), null)
+
+  // 8. 原子性：不应留下 .tmp
+  check('写入后无残留 tmp 文件', existsSync(`${file}.tmp`), false)
+
+  rmSync(dir, { recursive: true, force: true })
+}
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
 if (failures > 0) process.exitCode = 1
