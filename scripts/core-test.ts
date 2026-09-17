@@ -444,5 +444,134 @@ console.log('\n--- store.ts ---')
   rmSync(dir, { recursive: true, force: true })
 }
 
+import { Scheduler } from '../src/main/scheduler'
+
+console.log('\n--- scheduler.ts ---')
+{
+  const cleanups: string[] = []
+  const tmpStore = (prefix: string, name: string): Store => {
+    const d = mkdtempSync(join(tmpdir(), prefix))
+    cleanups.push(d)
+    return new Store(join(d, name))
+  }
+
+  // 1. 基本触发与幂等
+  const store = tmpStore('todo-sched-', 'a.json')
+  let clock = at(2026, 9, 16, 16, 14)
+  const batches: Array<{ fresh: string[]; missed: string[]; desktop: boolean }> = []
+
+  const sched = new Scheduler({
+    store,
+    isIdle: () => false,
+    now: () => clock,
+    notify: (batch, desktop) =>
+      batches.push({
+        fresh: batch.fresh.map((e) => e.task.id),
+        missed: batch.missed.map((e) => e.task.id),
+        desktop
+      })
+  })
+
+  store.addTask(deadline({ id: 'k1' }))   // 提醒点 16:15，创建于 08:00
+
+  sched.tick()
+  check('未到点不通知', batches.length, 0)
+
+  clock = at(2026, 9, 16, 16, 15, 30)
+  sched.tick()
+  check('到点通知一次', batches.length, 1)
+  check('归入 fresh', batches[0].fresh.join(','), 'k1')
+  check('desktop 为 true', batches[0].desktop, true)
+
+  sched.tick()
+  check('markFired 之前会重复通知', batches.length, 2)
+
+  const firedTask = store.tasks[0]
+  if (firedTask.kind === 'someday') throw new Error('任务类型不对')
+  sched.markFired([{ task: firedTask, at: at(2026, 9, 16, 16, 15) }])
+  sched.tick()
+  check('markFired 之后不再通知', batches.length, 2)
+
+  // 2. 错过批次
+  const store2 = tmpStore('todo-sched2-', 'b.json')
+  store2.addTask(deadline({ id: 'm1', createdAt: at(2026, 9, 16, 7, 0), dueAt: at(2026, 9, 16, 8, 0) }))
+  const b2: Array<{ fresh: string[]; missed: string[] }> = []
+  new Scheduler({
+    store: store2,
+    isIdle: () => false,
+    now: () => at(2026, 9, 16, 12, 0),
+    notify: (batch) =>
+      b2.push({ fresh: batch.fresh.map((e) => e.task.id), missed: batch.missed.map((e) => e.task.id) })
+  }).tick()
+  check('8 点的提醒点归入 missed', b2[0].missed.join(','), 'm1')
+  check('missed 不进 fresh', b2[0].fresh.length, 0)
+
+  // 3. 系统空闲 → 静默但仍交出批次
+  const store3 = tmpStore('todo-sched3-', 'c.json')
+  store3.addTask(deadline({ id: 'i1' }))
+  const b3: Array<{ desktop: boolean; count: number }> = []
+  const sched3 = new Scheduler({
+    store: store3,
+    isIdle: () => true,
+    now: () => at(2026, 9, 16, 16, 15, 30),
+    notify: (batch, desktop) => b3.push({ desktop, count: batch.fresh.length + batch.missed.length })
+  })
+  sched3.tick()
+  check('空闲时通知一次', b3.length, 1)
+  check('空闲时 desktop 为 false', b3[0].desktop, false)
+  check('空闲时批次仍带上了任务（给手机推送用）', b3[0].count, 1)
+  const idleTask = store3.tasks[0]
+  if (idleTask.kind === 'someday') throw new Error('任务类型不对')
+  check('空闲时也标记了 firedFor', idleTask.firedFor, at(2026, 9, 16, 16, 15))
+  sched3.tick()
+  check('空闲静默后不重复通知', b3.length, 1)
+
+  // 4. 免打扰时段
+  const store4 = tmpStore('todo-sched4-', 'd.json')
+  store4.patchSettings({ quietHours: { start: '22:00', end: '08:00' } })
+  store4.addTask(deadline({ id: 'n1', dueAt: at(2026, 9, 16, 23, 0) }))
+  const b4: Array<{ desktop: boolean }> = []
+  new Scheduler({
+    store: store4,
+    isIdle: () => false,
+    now: () => at(2026, 9, 16, 22, 50),
+    notify: (_batch, desktop) => b4.push({ desktop })
+  }).tick()
+  check('免打扰时段 desktop 为 false', b4.length === 1 && b4[0].desktop === false, true)
+
+  // 5. 暂停 / 恢复
+  const store5 = tmpStore('todo-sched5-', 'e.json')
+  store5.addTask(deadline({ id: 'z1' }))
+  let b5 = 0
+  const sched5 = new Scheduler({
+    store: store5,
+    isIdle: () => false,
+    now: () => at(2026, 9, 16, 16, 15, 30),
+    notify: () => { b5++ }
+  })
+  sched5.pause(30)
+  check('暂停后 pausedUntil 非空', sched5.pausedUntil !== null, true)
+  sched5.tick()
+  check('暂停期间不通知', b5, 0)
+  sched5.resume()
+  sched5.tick()
+  check('恢复后正常通知', b5, 1)
+
+  // 6. 全局关闭通知
+  const store6 = tmpStore('todo-sched6-', 'f.json')
+  store6.patchSettings({ notifyEnabled: false })
+  store6.addTask(deadline({ id: 'w1' }))
+  let b6 = 0
+  new Scheduler({
+    store: store6,
+    isIdle: () => false,
+    now: () => at(2026, 9, 16, 16, 15, 30),
+    notify: () => { b6++ }
+  }).tick()
+  check('全局关闭通知后不弹', b6, 0)
+
+  for (const d of cleanups) rmSync(d, { recursive: true, force: true })
+}
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
 if (failures > 0) process.exitCode = 1
