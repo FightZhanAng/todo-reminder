@@ -1,5 +1,129 @@
-import { app } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
+import { join } from 'node:path'
+import { ensureAumidRegistered } from './aumid'
+import { Notifier } from './notifier'
+import { Scheduler } from './scheduler'
+import { Store } from './store'
+import { TrayController } from './tray'
 
-app.whenReady().then(() => {
-  console.log('todo-reminder booted')
-})
+/**
+ * Windows 通知身份（AppUserModelID）。
+ *
+ * 开发态必须和安装版分开，否则这两个坑一定会踩：
+ *
+ * 1) Electron 会按当前 AUMID 自动生成一个开始菜单快捷方式（文件名 Electron.lnk，
+ *    位于 %APPDATA%\Microsoft\Windows\Start Menu\Programs），因为 Windows 要求
+ *    「AUMID 必须有一个开始菜单快捷方式」才肯把通知归属于本应用。
+ * 2) 若开发态直接复用安装版的 AUMID，会被覆盖成指向 electron.exe，
+ *    安装版的通知从此归属错乱。
+ *
+ * 安装版的快捷方式由 electron-builder 的 NSIS 建（shortcutName: 待办提醒）；
+ * 两边的 AUMID 必须不同。
+ */
+const APP_NAME = 'todo-reminder'
+const DEV_AUMID = 'com.tomcato.todo-reminder.dev'
+const PROD_AUMID = 'com.tomcato.todo-reminder'
+
+// 必须在取 userData 路径之前调。不设名字的话，未打包的 Electron 会共用
+// %APPDATA%\Electron 当 userData，跟别的 electron.exe 开发程序互相踩数据，
+// 也不符合约定的 %APPDATA%/todo-reminder/todo-reminder.json。
+app.setName(APP_NAME)
+
+const AUMID = app.isPackaged ? PROD_AUMID : DEV_AUMID
+app.setAppUserModelId(AUMID)
+
+// 光有 AUMID 不够 —— 见修正表第 11 条：必须补上 Electron 不写的注册表键，
+// 否则通知完全不弹（实测）。安装版有 NSIS 建的开始菜单快捷方式兜底，
+// 但重复写一遍无害且幂等，所以不做 if (app.isPackaged) 分支。
+ensureAumidRegistered(AUMID, APP_NAME)
+
+let mainWindow: BrowserWindow | null = null
+let store: Store
+let scheduler: Scheduler
+let notifier: Notifier
+let tray: TrayController
+
+function showMainWindow(): void {
+  // 第二期做真正的界面。现在只保证窗口能开，里面是占位 HTML。
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+    return
+  }
+
+  mainWindow = new BrowserWindow({
+    width: 420,
+    height: 640,
+    minWidth: 340,
+    minHeight: 480,
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+  mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
+/** 单实例：第二次启动时唤起已有窗口，而不是再开一个托盘图标 */
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => showMainWindow())
+
+  app.whenReady().then(() => {
+    store = new Store(join(app.getPath('userData'), 'todo-reminder.json'))
+    if (store.corruptBackupPath) {
+      console.error('[boot] 数据文件损坏，已备份到', store.corruptBackupPath)
+    }
+
+    scheduler = new Scheduler({
+      store,
+      isIdle: () =>
+        powerMonitor.getSystemIdleTime() >= store.settings.idleThresholdMin * 60,
+      notify: (batch, desktop) => {
+        notifier.showBatch(batch, desktop)
+        tray.refresh()
+        // 回填 firedFor：非静默（desktop=true）路径不靠调度器自标，
+        // 必须由调用方在通知真正弹出去之后标，否则同批任务每 TICK_MS 重弹一次。
+        // 静默路径调度器已自标，这里再标一次幂等、无害。
+        scheduler.markFired([...batch.fresh, ...batch.missed])
+      }
+    })
+
+    notifier = new Notifier({
+      store,
+      scheduler,
+      onFocusTask: (taskId) => showMainWindow()
+    })
+
+    tray = new TrayController({
+      store,
+      scheduler,
+      onOpen: () => showMainWindow(),
+      onQuickAdd: () => showMainWindow(),   // 第二期换独立小窗
+      onSettings: () => showMainWindow(),   // 第二期换成设置页
+      onQuit: () => {
+        scheduler.stop()
+        tray.destroy()
+        app.quit()
+      }
+    })
+    tray.create()
+
+    scheduler.start()
+
+    ipcMain.handle('app:quit', () => app.quit())
+    ipcMain.handle('app:open-data-dir', () => shell.showItemInFolder(store.dataFile))
+
+    // 托盘常驻，不跟随窗口关闭退出
+    app.on('window-all-closed', () => undefined)
+  })
+
+  app.on('before-quit', () => scheduler?.stop())
+}
