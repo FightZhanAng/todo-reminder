@@ -223,5 +223,74 @@ console.log('\n--- dueNow ---')
 console.log('\n--- 骨架自检 ---')
 check('测试链路可用', 1 + 1, 2)
 
+import { groupMissed, groupToday } from '../src/shared/group'
+import { inQuietHours } from '../src/shared/quiet'
+
+console.log('\n--- group.ts ---')
+{
+  const now = at(2026, 9, 16, 12, 0)   // 周三
+
+  const overdueTask = deadline({ id: 'o1', dueAt: at(2026, 9, 15, 16, 0) })
+  const todayTimed = deadline({ id: 'u1', dueAt: at(2026, 9, 16, 16, 30) })
+  const todayAllDay = deadline({ id: 'a1', dueAt: at(2026, 9, 16), allDay: true })
+  const tomorrowTimed = deadline({ id: 'u2', dueAt: at(2026, 9, 17, 10, 0) })
+  const doneToday = deadline({ id: 'u3', dueAt: at(2026, 9, 16, 18, 0), completedAt: now })
+  const gone = deadline({ id: 'u4', dueAt: at(2026, 9, 16, 19, 0), deletedAt: now })
+  const dueToday = recurring({ id: 'r1' })
+  const notToday = recurring({ id: 'r2', rule: { freq: 'weekly', every: 1, days: [1], skipWeekend: false } })
+  const doneRecurring = recurring({ id: 'r3', lastDoneDay: '2026-09-16' })
+
+  const all: Task[] = [
+    overdueTask, todayTimed, todayAllDay, tomorrowTimed, doneToday, gone,
+    dueToday, notToday, doneRecurring, someday()
+  ]
+  const g = groupToday(all, S, now)
+
+  check('逾期只有 1 条', g.overdue.map((t) => t.id).join(','), 'o1')
+  check('接下来只有带时刻的今日任务', g.upcoming.map((t) => t.id).join(','), 'u1')
+  check('今天随时只有全天型的今日任务', g.anytime.map((t) => t.id).join(','), 'a1')
+  check('每天只有今天该做且未做的', g.recurring.map((t) => t.id).join(','), 'r1')
+  check('已完成不进任何段', g.upcoming.concat(g.anytime).some((t) => t.id === 'u3'), false)
+  check('已软删除不进任何段', g.upcoming.concat(g.anytime).some((t) => t.id === 'u4'), false)
+  check('明天的任务不在今天', g.upcoming.concat(g.anytime).some((t) => t.id === 'u2'), false)
+
+  const imp = deadline({ id: 'a2', dueAt: at(2026, 9, 16), allDay: true, important: true })
+  check('今天随时：important 优先', groupToday([todayAllDay, imp], S, now).anytime.map((t) => t.id).join(','), 'a2,a1')
+}
+
+console.log('\n--- groupMissed ---')
+{
+  const now = at(2026, 9, 16, 12, 0)
+  const entries = [
+    { task: deadline({ id: 'f1' }), at: at(2026, 9, 16, 11, 55) },  // 5 分钟前
+    { task: deadline({ id: 'm1' }), at: at(2026, 9, 16, 8, 0) },    // 4 小时前
+    { task: deadline({ id: 'f2' }), at: at(2026, 9, 16, 11, 50) },  // 正好 10 分钟
+    { task: deadline({ id: 'm2' }), at: at(2026, 9, 16, 11, 49, 59) }
+  ]
+  const r = groupMissed(entries, now)
+  check('fresh 含 5 分钟前那条', r.fresh.some((e) => e.task.id === 'f1'), true)
+  check('missed 含 4 小时前那条', r.missed.some((e) => e.task.id === 'm1'), true)
+  check('正好 10 分钟算 fresh', r.fresh.some((e) => e.task.id === 'f2'), true)
+  check('超过 10 分钟算 missed', r.missed.some((e) => e.task.id === 'm2'), true)
+  check('空数组不炸', groupMissed([], now).fresh.length, 0)
+}
+
+console.log('\n--- quiet.ts ---')
+{
+  const overnight = { ...S, quietHours: { start: '22:00', end: '08:00' } }
+  check('跨午夜：23:00 静默', inQuietHours(overnight, at(2026, 9, 16, 23, 0)), true)
+  check('跨午夜：07:00 静默', inQuietHours(overnight, at(2026, 9, 16, 7, 0)), true)
+  check('跨午夜：12:00 不静默', inQuietHours(overnight, at(2026, 9, 16, 12, 0)), false)
+  check('跨午夜：08:00 整点结束', inQuietHours(overnight, at(2026, 9, 16, 8, 0)), false)
+  check('跨午夜：22:00 整点开始', inQuietHours(overnight, at(2026, 9, 16, 22, 0)), true)
+
+  const daytime = { ...S, quietHours: { start: '09:00', end: '18:00' } }
+  check('同日时段内 12:00', inQuietHours(daytime, at(2026, 9, 16, 12, 0)), true)
+  check('同日时段外 20:00', inQuietHours(daytime, at(2026, 9, 16, 20, 0)), false)
+
+  check('未配置免打扰时段', inQuietHours(S, at(2026, 9, 16, 23, 0)), false)
+  check('起止相同视为不启用', inQuietHours({ ...S, quietHours: { start: '09:00', end: '09:00' } }, at(2026, 9, 16, 9, 0)), false)
+}
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
 if (failures > 0) process.exitCode = 1
