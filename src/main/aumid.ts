@@ -28,7 +28,22 @@ const ACTIVATOR_LABEL = 'Electron Notification Activator'
  *
  * 做法：先在 CLSID 树下按默认值搜 label 找到候选键，再逐个比对 LocalServer32。
  */
+/**
+ * 成功扫到过一次就缓存下来，之后不再扫整棵 CLSID 树。
+ * - 未扫过 / 上次没扫到：保持 undefined，每次调用都重试；
+ * - 扫到：存成字符串，之后直接返回，避免每个 tick（TICK_MS=10s）
+ *   都跑一次 `reg query /s` 全树扫描把调度拖慢。
+ *
+ * 失败的返回值（null）**绝不缓存** —— 否则会卡死在「再也
+ * 不重试」，错过 Electron 稍后写下自己 CLSID 键的时机。
+ * 这正是「启动时没扫到、show() 前再扫一次」兜底能成立的
+ * 前提：失败时永远保留重试能力。
+ */
+let cachedActivatorClsid: string | null | undefined = undefined
+
 function findElectronActivatorClsid(): string | null {
+  if (cachedActivatorClsid !== undefined) return cachedActivatorClsid
+
   const exe = process.execPath
 
   let stdout: string
@@ -51,7 +66,10 @@ function findElectronActivatorClsid(): string | null {
         windowsHide: true
       })
       // 取值行的最后一段就是数据；带引号的路径要去引号
-      if (line.includes(exe)) return key.slice(key.lastIndexOf('\\') + 1)
+      if (line.includes(exe)) {
+        cachedActivatorClsid = key.slice(key.lastIndexOf('\\') + 1)
+        return cachedActivatorClsid
+      }
     } catch {
       /* 没有 LocalServer32 子键，跳过 */
     }

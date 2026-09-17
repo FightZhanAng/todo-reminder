@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import { join } from 'node:path'
-import { ensureAumidRegistered } from './aumid'
+import { ensureAumidActivator, ensureAumidRegistered } from './aumid'
 import { Notifier } from './notifier'
 import { Scheduler } from './scheduler'
 import { Store } from './store'
@@ -87,6 +87,11 @@ if (!app.requestSingleInstanceLock()) {
       isIdle: () =>
         powerMonitor.getSystemIdleTime() >= store.settings.idleThresholdMin * 60,
       notify: (batch, desktop) => {
+        // show() 前再扫一次 AUMID 激活器：Electron 何时写下自己的 CLSID 键
+        // 没实测过，可能晚于启动时的 ensureAumidRegistered。扫不到就不写，
+        // 留待下次 tick 重试（aumid.ts 里失败不缓存）；扫到则缓存、后续
+        // 每 tick 都走廉价短路。这样窗口期内点击也不会冷启动裸 electron.exe。
+        ensureAumidActivator(AUMID)
         notifier.showBatch(batch, desktop)
         tray.refresh()
         // 回填 firedFor：非静默（desktop=true）路径不靠调度器自标，
