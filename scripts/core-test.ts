@@ -292,5 +292,89 @@ console.log('\n--- quiet.ts ---')
   check('起止相同视为不启用', inQuietHours({ ...S, quietHours: { start: '09:00', end: '09:00' } }, at(2026, 9, 16, 9, 0)), false)
 }
 
+import { ACTION_ORDER, actionLabel, actionPatch } from '../src/shared/actions'
+import { describeTask, missedSummary } from '../src/shared/notifyText'
+
+console.log('\n--- actions.ts ---')
+{
+  // 数组下标就是 toast 回传的 actionIndex，顺序是承重的
+  check('按钮顺序 = actionIndex 下标', ACTION_ORDER.join(','), 'complete,snooze,tomorrow')
+  check('完成按钮文案', actionLabel('complete', 10), '完成')
+  // 推迟的分钟数必须来自设置
+  check('推迟按钮文案跟着设置走', actionLabel('snooze', 20), '推迟 20 分钟')
+  check('推到明天按钮文案', actionLabel('tomorrow', 10), '推到明天')
+
+  const now = at(2026, 9, 16, 16, 20)
+  const opts = { snoozeMinutes: 10 }
+
+  check('完成截止型：写 completedAt', actionPatch(deadline({ id: 'x1' }), 'complete', now, opts).completedAt, now)
+
+  const snoozed = actionPatch(deadline({ id: 'x2', firedFor: at(2026, 9, 16, 16, 15) }), 'snooze', now, opts)
+  check('推迟：snoozeUntil = now + 10 分钟', snoozed.snoozeUntil, at(2026, 9, 16, 16, 30))
+  check('推迟：清空 firedFor 以便重新触发', snoozed.firedFor, null)
+
+  // 「推到明天」= 截止时间整体挪到明天的相同时刻
+  const tmr = actionPatch(deadline({ id: 'x3' }), 'tomorrow', now, opts)
+  check('推到明天：截止时间挪到明天同一时刻', tmr.dueAt, at(2026, 9, 17, 16, 30))
+  check('推到明天：清掉 snoozeUntil', tmr.snoozeUntil, null)
+  check('推到明天：清掉 firedFor', tmr.firedFor, null)
+
+  const tmrAllDay = actionPatch(deadline({ id: 'x4', dueAt: at(2026, 9, 16), allDay: true }), 'tomorrow', now, opts)
+  check('全天型推到明天', tmrAllDay.dueAt, at(2026, 9, 17))
+
+  // 周期任务：「推到明天」= 今天跳过，不打断规则
+  const tmrRecurring = actionPatch(recurring({ id: 'x5' }), 'tomorrow', now, opts)
+  check('周期任务推到明天 = 标记今天已处理', tmrRecurring.lastDoneDay, '2026-09-16')
+  check('周期任务推到明天不动 streak', tmrRecurring.streak, undefined)
+
+  // 周期任务完成：连续天数
+  const r1 = actionPatch(recurring({ id: 'y1', lastDoneDay: '2026-09-15', streak: 11 }), 'complete', now, opts)
+  check('周期任务：昨天做过则 streak + 1', r1.streak, 12)
+  check('周期任务：记录今天', r1.lastDoneDay, '2026-09-16')
+
+  const r2 = actionPatch(recurring({ id: 'y2', lastDoneDay: '2026-09-10', streak: 5 }), 'complete', now, opts)
+  check('周期任务：断档则 streak 归 1', r2.streak, 1)
+
+  const r3 = actionPatch(recurring({ id: 'y3', lastDoneDay: '2026-09-16', streak: 3 }), 'complete', now, opts)
+  check('周期任务：今天已做过则不变', r3.streak, undefined)
+}
+
+console.log('\n--- notifyText.ts ---')
+{
+  const now = at(2026, 9, 16, 16, 0)
+
+  check('标题就是任务标题', describeTask(deadline(), at(2026, 9, 16, 16, 15), now).title, '交周报')
+  check('不到 1 小时用分钟表述', describeTask(deadline(), at(2026, 9, 16, 16, 15), now).body, '还有 30 分钟')
+
+  // 提醒点 16:00 相对 now 是 0 分钟差 → 走「现在」分支
+  check('提醒点等于 now 说「现在」', describeTask(deadline(), now, now).body, '现在')
+
+  // tick 有 10 秒粒度，通知总是比提醒点略晚一点点弹出来：
+  // 这条路径不能说「已逾期」，否则离截止还有 15 分钟的通知在撒谎
+  const tickLate = at(2026, 9, 16, 16, 15, 5)
+  check('迟 5 秒弹出来仍说「现在」', describeTask(deadline(), at(2026, 9, 16, 16, 15), tickLate).body, '现在')
+
+  const farTask = deadline({ dueAt: at(2026, 9, 16, 18, 0) })
+  check('大于 1 小时用小时表述', describeTask(farTask, at(2026, 9, 16, 17, 45), now).body, '还有 2 小时')
+
+  check('全天型说「今天」', describeTask(deadline({ allDay: true }), at(2026, 9, 16, 9, 0), now).body, '今天')
+  check('周期型说「今天」', describeTask(recurring(), at(2026, 9, 16, 9, 0), now).body, '今天')
+  check('已过提醒点说「已逾期」', describeTask(deadline(), at(2026, 9, 15, 15, 45), now).body, '已逾期')
+
+  const s = missedSummary(
+    ['交周报', '给猎头回邮件', '看简历'].map((title, i) => ({ task: deadline({ id: `s${i}`, title }), at: 0 })),
+    3
+  )
+  check('错过标题带件数', s.title, '有 3 件事错过了')
+  check('错过正文用间隔点连接', s.body, '交周报 · 给猎头回邮件 · 看简历')
+
+  const many = missedSummary(
+    ['甲', '乙', '丙', '丁', '戊'].map((title, i) => ({ task: deadline({ id: `m${i}`, title }), at: 0 })),
+    3
+  )
+  check('超过上限时省略并给总数', many.body, '甲 · 乙 · 丙 等 5 件')
+  check('超过上限时标题仍是总数', many.title, '有 5 件事错过了')
+}
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
 if (failures > 0) process.exitCode = 1
