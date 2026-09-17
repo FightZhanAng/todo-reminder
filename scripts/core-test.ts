@@ -25,6 +25,66 @@ function at(y: number, m: number, d: number, h = 0, min = 0, s = 0): number {
   return new Date(y, m - 1, d, h, min, s, 0).getTime()
 }
 
+import { DEFAULT_SETTINGS } from '../src/shared/defaults'
+import type { DeadlineTask, RecurringTask, SomedayTask, Task } from '../src/shared/types'
+
+function deadline(patch: Partial<DeadlineTask> = {}): DeadlineTask {
+  return {
+    kind: 'deadline',
+    id: 'd1',
+    title: '交周报',
+    important: false,
+    createdAt: at(2026, 9, 16, 8, 0),
+    updatedAt: at(2026, 9, 16, 8, 0),
+    deletedAt: null,
+    firedFor: null,
+    pushedFor: null,
+    dueAt: at(2026, 9, 16, 16, 30),
+    allDay: false,
+    leadMin: 15,
+    snoozeUntil: null,
+    completedAt: null,
+    ...patch
+  }
+}
+
+function recurring(patch: Partial<RecurringTask> = {}): RecurringTask {
+  return {
+    kind: 'recurring',
+    id: 'r1',
+    title: '早上看简历',
+    important: false,
+    createdAt: at(2026, 9, 14),
+    updatedAt: at(2026, 9, 14),
+    deletedAt: null,
+    firedFor: null,
+    pushedFor: null,
+    rule: { freq: 'daily', every: 1, skipWeekend: false },
+    remindTime: '09:00',
+    lastDoneDay: null,
+    streak: 0,
+    ...patch
+  }
+}
+
+function someday(patch: Partial<SomedayTask> = {}): SomedayTask {
+  return {
+    kind: 'someday',
+    id: 's1',
+    title: '想看的书',
+    important: false,
+    createdAt: at(2026, 9, 14),
+    updatedAt: at(2026, 9, 14),
+    deletedAt: null,
+    firedFor: null,
+    pushedFor: null,
+    ...patch
+  }
+}
+
+/** 测试用的设置基线 */
+const S = { ...DEFAULT_SETTINGS, allDayRemindTime: '09:00', defaultLeadMin: 15 }
+
 import { addDays, atTimeOfDay, dayIndex, dayKey, daysInMonth, parseHM, startOfDay } from '../src/shared/time'
 
 console.log('\n--- time.ts ---')
@@ -117,6 +177,47 @@ console.log('\n--- recurrence.ts ---')
     JSON.stringify([at(2026, 9, 16), at(2026, 9, 21)])
   )
   check('expandRecurrence count 为 0', expandRecurrence(daily, anchor, anchor, 0).length, 0)
+}
+
+import { dueNow, isRemindable, remindAtOf } from '../src/shared/remind'
+
+console.log('\n--- remind.ts ---')
+check('isRemindable 排除清单池', isRemindable(someday()), false)
+check('isRemindable 认得截止型', isRemindable(deadline()), true)
+
+check('截止型：提醒点 = 截止 - 提前量', remindAtOf(deadline(), S, at(2026, 9, 16, 8, 0)), at(2026, 9, 16, 16, 15))
+check('全天型：提醒点 = 当天 09:00', remindAtOf(deadline({ allDay: true }), S, at(2026, 9, 16, 8, 0)), at(2026, 9, 16, 9, 0))
+check('已完成不再提醒', remindAtOf(deadline({ completedAt: at(2026, 9, 16, 12, 0) }), S, at(2026, 9, 16, 12, 0)), null)
+check('已软删除不再提醒', remindAtOf(deadline({ deletedAt: at(2026, 9, 16, 12, 0) }), S, at(2026, 9, 16, 12, 0)), null)
+check('推迟后提醒点用 snoozeUntil', remindAtOf(deadline({ snoozeUntil: at(2026, 9, 16, 17, 0) }), S, at(2026, 9, 16, 16, 15)), at(2026, 9, 16, 17, 0))
+
+check('周期型：今天该做则给今天的提醒时刻', remindAtOf(recurring(), S, at(2026, 9, 16, 8, 0)), at(2026, 9, 16, 9, 0))
+check('周期型：今天已做则 null', remindAtOf(recurring({ lastDoneDay: '2026-09-16' }), S, at(2026, 9, 16, 10, 0)), null)
+check(
+  '周期型：今天不该做则 null',
+  remindAtOf(recurring({ rule: { freq: 'weekly', every: 1, days: [1], skipWeekend: false } }), S, at(2026, 9, 16, 8, 0)),
+  null
+)
+
+console.log('\n--- dueNow ---')
+{
+  const now = at(2026, 9, 16, 16, 20)
+
+  // 提醒点 16:15，创建于 08:00 → 该弹
+  check('到点且未弹过 → 弹出', dueNow([deadline()], S, now).length, 1)
+  check('到点且未弹过 → 携带提醒点', dueNow([deadline()], S, now)[0].at, at(2026, 9, 16, 16, 15))
+  check('已弹过 → 不再弹', dueNow([deadline({ firedFor: at(2026, 9, 16, 16, 15) })], S, now).length, 0)
+  check('未到点 → 不弹', dueNow([deadline()], S, at(2026, 9, 16, 16, 0)).length, 0)
+
+  // 规格 §5 边界 5：提醒点早于创建时间 → 不提醒
+  // 15:50 建一个 16:00 截止、提前 15 分钟的任务，提醒点 15:45 比创建时间还早
+  const lateCreated = deadline({ createdAt: at(2026, 9, 16, 15, 50), dueAt: at(2026, 9, 16, 16, 0) })
+  check('提醒点早于创建时间 → 不弹', dueNow([lateCreated], S, now).length, 0)
+
+  // 排序：按提醒点升序（b 的提醒点 16:45，a 的 17:45）
+  const a = deadline({ id: 'a', dueAt: at(2026, 9, 16, 18, 0) })
+  const b = deadline({ id: 'b', dueAt: at(2026, 9, 16, 17, 0) })
+  check('结果按提醒点升序', dueNow([a, b], S, at(2026, 9, 16, 18, 0)).map((e) => e.task.id).join(','), 'b,a')
 }
 
 console.log('\n--- 骨架自检 ---')
