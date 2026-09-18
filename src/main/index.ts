@@ -1,9 +1,12 @@
-import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, powerMonitor } from 'electron'
 import { join } from 'node:path'
 import { ensureAumidActivator, ensureAumidRegistered } from './aumid'
+import { broadcast, registerIpc, type AppContext } from './ipc'
+import { NoticeCenter } from './notices'
 import { Notifier } from './notifier'
 import { Scheduler } from './scheduler'
 import { Store } from './store'
+import { applyTheme } from './theme'
 import { TrayController } from './tray'
 
 /**
@@ -43,6 +46,10 @@ let scheduler: Scheduler
 let notifier: Notifier
 let tray: TrayController
 
+let ctx: AppContext
+
+const notices = new NoticeCenter()
+
 function showMainWindow(): void {
   // 第二期做真正的界面。现在只保证窗口能开，里面是占位 HTML。
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -67,6 +74,8 @@ function showMainWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+  // 首帧由主进程主动推一次，渲染层不需要在挂载时先 get()
+  mainWindow.webContents.on('did-finish-load', () => broadcast(ctx))
   mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
@@ -78,9 +87,18 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     store = new Store(join(app.getPath('userData'), 'todo-reminder.json'))
-    if (store.corruptBackupPath) {
-      console.error('[boot] 数据文件损坏，已备份到', store.corruptBackupPath)
+    if (store.corruptBackupPath !== null) {
+      notices.raise({
+        id: 'corrupt-backup',
+        level: 'error',
+        text: `数据文件损坏，已备份到 ${store.corruptBackupPath}`,
+        action: { label: '打开所在文件夹', windowAction: 'open-data-dir' },
+        at: Date.now()
+      })
     }
+
+    // 主题在启动时先对齐一次 —— 设置有可能被改在别处
+    applyTheme(store.settings.theme)
 
     scheduler = new Scheduler({
       store,
@@ -98,6 +116,7 @@ if (!app.requestSingleInstanceLock()) {
         // 必须由调用方在通知真正弹出去之后标，否则同批任务每 TICK_MS 重弹一次。
         // 静默路径调度器已自标，这里再标一次幂等、无害。
         scheduler.markFired([...batch.fresh, ...batch.missed])
+        broadcast(ctx)
       }
     })
 
@@ -122,10 +141,28 @@ if (!app.requestSingleInstanceLock()) {
     })
     tray.create()
 
-    scheduler.start()
+    // 装配：AppContext 只用**此刻已有的部件**，后面每个任务增量补自己那块。
+    // 四个最小顶替（windows / hotkeyRegistered / setHotkey / quickAdd）都是
+    // 「诚实回答」而不是假成功，Task 12 换成真的。
+    ctx = {
+      store,
+      scheduler,
+      notices,
+      windows: () => [mainWindow].filter((w): w is BrowserWindow => w !== null),
+      hotkeyRegistered: () => false,
+      afterCommand: () => {
+        // 完成/推迟/推到明天/新建/编辑/删除/设置变更都要立刻重算一次并刷新托盘
+        scheduler.tick()
+        tray.refresh()
+      },
+      afterPauseChange: () => tray.refresh(),
+      setHotkey: () => false,
+      quickAdd: { hide: () => undefined }
+    }
 
-    ipcMain.handle('app:quit', () => app.quit())
-    ipcMain.handle('app:open-data-dir', () => shell.showItemInFolder(store.dataFile))
+    registerIpc(ctx)
+
+    scheduler.start()
 
     // 托盘常驻，不跟随窗口关闭退出
     app.on('window-all-closed', () => undefined)

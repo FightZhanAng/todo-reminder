@@ -21,7 +21,9 @@ export const IPC = {
   /** 快速添加窗 → main：提交一条草稿后关窗 */
   quickAdd: 'todo:quickadd',
   /** 快速添加窗 → main：取消 */
-  quickAddCancel: 'todo:quickadd-cancel'
+  quickAddCancel: 'todo:quickadd-cancel',
+  /** renderer → main：改全局快捷键。**先试注册，成功才写设置** */
+  setHotkey: 'todo:set-hotkey'
 } as const
 
 /** 窗口 / 进程级动作。不改数据，所以不走命令层 */
@@ -63,6 +65,8 @@ export interface TodoApi {
   /** 返回取消订阅的函数 */
   onSnapshot(cb: (snapshot: Snapshot) => void): () => void
   onFocusTask(cb: (taskId: string) => void): () => void
+  /** 返回的不是 `Snapshot`，只是一个结果 —— 显示值由广播更新，错误由这个结果当场反馈 */
+  setHotkey(hotkey: string): Promise<{ ok: boolean }>
   window(action: WindowAction): Promise<void>
 }
 
