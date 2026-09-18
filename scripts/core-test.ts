@@ -55,6 +55,8 @@ import {
   MISS_GRACE_MS,
   TICK_MS
 } from '../src/shared/defaults'
+import { SOON_WINDOW_MS, urgencyOf } from '../src/shared/urgency'
+import { hotkeyFromEvent, isValidHotkey, normalizeHotkey } from '../src/shared/hotkey'
 
 function deadline(patch: Partial<DeadlineTask> = {}): DeadlineTask {
   return {
@@ -783,6 +785,58 @@ console.log('\n--- 托盘图标：必须是真有像素的 PNG ---')
 
   check('parseHexColor 三位简写', JSON.stringify(parseHexColor('#f0a')), JSON.stringify({ r: 255, g: 0, b: 170 }))
   check('parseHexColor 非法值退回黑', JSON.stringify(parseHexColor('nope')), JSON.stringify({ r: 0, g: 0, b: 0 }))
+}
+
+console.log('\n--- urgency.ts ---')
+{
+  const now = at(2026, 9, 16, 16, 0)
+  check('逾期：dueAt 早于今天零点', urgencyOf(deadline({ dueAt: at(2026, 9, 15, 9, 0) }), now), 'overdue')
+  check('今天 15:00 截止、现在 16:00 → 不算逾期（还在今天）',
+    urgencyOf(deadline({ dueAt: at(2026, 9, 16, 15, 0) }), now), 'soon')
+  check('1 小时内 → soon', urgencyOf(deadline({ dueAt: at(2026, 9, 16, 16, 30) }), now), 'soon')
+  check('刚好 1 小时 → soon', urgencyOf(deadline({ dueAt: now + SOON_WINDOW_MS }), now), 'soon')
+  check('1 小时零 1 毫秒 → none', urgencyOf(deadline({ dueAt: now + SOON_WINDOW_MS + 1 }), now), 'none')
+  check('全天型不会 soon（没有具体时刻）',
+    urgencyOf(deadline({ allDay: true, dueAt: at(2026, 9, 16) }), now), 'none')
+  check('已完成 → none', urgencyOf(deadline({ completedAt: now, dueAt: at(2026, 9, 15) }), now), 'none')
+  check('周期任务 → none', urgencyOf(recurring(), now), 'none')
+  check('清单池 → none', urgencyOf(someday(), now), 'none')
+}
+
+console.log('\n--- hotkey.ts ---')
+{
+  check('小写规范成大写', normalizeHotkey('ctrl+alt+t'), 'Control+Alt+T')
+  check('大写同样通过', normalizeHotkey('CTRL+ALT+T'), 'Control+Alt+T')
+  check('修饰键输出顺序固定（与输入顺序无关）', normalizeHotkey('shift+alt+ctrl+p'), 'Control+Alt+Shift+P')
+  check('Super 别名 win', normalizeHotkey('win+shift+k'), 'Shift+Super+K')   // 见下方说明
+  check('单个字母不带修饰键 → null', normalizeHotkey('t'), null)
+  check('只有修饰键 → null', normalizeHotkey('Control+Alt'), null)
+  check('两个主键 → null', normalizeHotkey('Control+A+B'), null)
+  check('空串 → null', normalizeHotkey(''), null)
+  check('垃圾主键 → null', normalizeHotkey('Control+NotAKey'), null)
+  check('功能键', normalizeHotkey('ctrl+f5'), 'Control+F5')
+  check('F25 不存在', normalizeHotkey('ctrl+f25'), null)
+  check('空格', normalizeHotkey('ctrl+space'), 'Control+Space')
+  check('方向键别名归一', normalizeHotkey('ctrl+arrowup'), 'Control+Up')
+  check('isValidHotkey 复用 normalize 的判定', isValidHotkey('control+alt+t'), true)
+  check('isValidHotkey 拒绝无修饰键', isValidHotkey('t'), false)
+
+  const ev = (patch: Partial<Parameters<typeof hotkeyFromEvent>[0]>) => ({
+    key: '', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...patch
+  })
+  check('只按 Control → null（还没按完）',
+    hotkeyFromEvent(ev({ key: 'Control', ctrlKey: true })), null)
+  check('没有修饰键 → null', hotkeyFromEvent(ev({ key: 't' })), null)
+  check('Control+Alt+T',
+    hotkeyFromEvent(ev({ key: 't', ctrlKey: true, altKey: true })), 'Control+Alt+T')
+  check('Control+Shift+K（key 是大写 K）',
+    hotkeyFromEvent(ev({ key: 'K', ctrlKey: true, shiftKey: true })), 'Control+Shift+K')
+  check('Control+空格',
+    hotkeyFromEvent(ev({ key: ' ', ctrlKey: true })), 'Control+Space')
+  check('Control+ArrowUp',
+    hotkeyFromEvent(ev({ key: 'ArrowUp', ctrlKey: true })), 'Control+Up')
+  check('Dead 键忽略',
+    hotkeyFromEvent(ev({ key: 'Dead', ctrlKey: true })), null)
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
