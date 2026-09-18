@@ -66,19 +66,25 @@ export function TaskRow({
   // 退场行的交互契约（两种行不一样，别混）：
   // - done：520ms 内整行不可点击（挂 .row--exiting → pointer-events:none），
   //   避免用户点到一条正在消失的行（规格 §9.5）。
-  // - removed：5 秒撤销窗口内必须可点击 —— 不挂 .row--exiting，
-  //   否则「撤销」按钮在鼠标下完全不可达，撤销功能等于没做。
+  // - removed：5 秒撤销窗口内整行仍不可点（.row--exiting 保留，否则误触
+  //   圆点/标题会给已软删任务写 completedAt，撤销后 groupToday 因 completedAt
+  //   直接不渲染，看起来「撤销没生效」）；但「撤销」按钮单独放开（见
+  //   styles.css 的 .row--removed .row__undo { pointer-events: auto }），让它可点。
   const classes = ['row']
   if (cursor) classes.push('row--cursor')
   if (highlight) classes.push('row--highlight')
-  if (exitKind === 'done') classes.push('row--exiting')
-  // removed：只降透明度（.row--removed），交互保持开启，让「撤销」可点
+  // 两种退场行都挂 .row--exiting（整行 pointer-events:none），只把「撤销」放出来
+  if (exitKind) classes.push('row--exiting')
   if (removed) classes.push('row--removed')
   if (exitKind === 'done') classes.push('row--done')
 
-  // 菜单开合 → 通知上层（Board 用来挂起看板快捷键，Important 2）
+  // 菜单开合 → 通知上层（Board 用来挂起看板快捷键，Important 2）。
+  // cleanup 兜底：行在菜单打开时被卸载（如跨零点重新分组导致换段/消失，
+  // SectionList 段空返回 null），也要补报 false，否则 menuOpen 卡在 true
+  // 会永久挂起看板快捷键，直到再开合一次菜单或重进看板才恢复。
   useEffect(() => {
     onMenuOpenChange?.(anchor !== null)
+    return () => onMenuOpenChange?.(false)
   }, [anchor, onMenuOpenChange])
 
   return (

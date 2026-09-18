@@ -327,6 +327,13 @@ ul {
   border-color: var(--ink-muted);
 }
 
+/* 已删除行整行被 .row--exiting 设为 pointer-events:none，
+   只把「撤销」这一个按钮单独放开（New problem 1）：5 秒里只有它能点、能生效，
+   圆点与标题仍点不动，避免给已软删任务误写 completedAt。 */
+.row--removed .row__undo {
+  pointer-events: auto;
+}
+
 /* 完成退场时整行降透明度再移出（规格 §9.5 第二拍） */
 .row--done {
   animation: row-leave 260ms ease-out 260ms forwards;

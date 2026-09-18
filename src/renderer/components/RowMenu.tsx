@@ -37,10 +37,16 @@ export function RowMenu({ items, anchor, anchorEl, onClose }: RowMenuProps): JSX
     const x = Math.max(margin, Math.min(anchor.x - width, window.innerWidth - width - margin))
     const y = Math.max(margin, Math.min(anchor.y, window.innerHeight - height - margin))
     setPos({ x, y, visible: true })
-    // 打开即聚焦首项：点开后直接按 Enter / Space 就能激活（Important 2 ②），
-    // 也方便键盘在菜单内 Tab 移动
-    el.querySelector<HTMLButtonElement>('button')?.focus()
   }, [anchor.x, anchor.y])
+
+  // 焦点必须等「可见」真正提交后再打：上一步 setPos 与首帧 visibility:hidden 同体
+  // 同步执行时，visibility:hidden 的元素不可聚焦，focus() 会静默失败（审查 ②）。
+  // 这里挂在 pos.visible 上，元素已 painted 为 visible 后才聚焦 —— 开菜单后直接
+  // 按 Enter / Space 就能激活首个菜单项，而不是关掉菜单。
+  useEffect(() => {
+    if (!pos.visible) return
+    ref.current?.querySelector<HTMLButtonElement>('button')?.focus()
+  }, [pos.visible])
 
   useEffect(() => {
     const onDown = (e: MouseEvent): void => {
