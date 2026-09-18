@@ -532,3 +532,36 @@ ul {
 .topbar__title {
   margin: 0;
 }
+
+/*
+ * 划掉的那一笔。覆盖在标题上，不参与布局。
+ *
+ * stroke 宽度用 vector-effect 保持"不随 viewBox 缩放变形"——
+ * viewBox 是 100×8 的抽象坐标，实际宽度随窗口变，不加这个会拉成一条粗带。
+ */
+.strike {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 0;
+  height: 100%;
+  overflow: visible;
+}
+
+.strike path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-opacity: 0.85;
+  stroke-linecap: round;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+@keyframes strike-draw {
+  from {
+    stroke-dashoffset: var(--strike-len, 120);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}

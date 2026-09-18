@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import type { Task } from '@shared/types'
 import { urgencyOf } from '@shared/urgency'
 import { RowMenu, type MenuItem } from './RowMenu'
+import { StrikeLine } from './StrikeLine'
 import type { AppState } from '../useAppState'
 
 export interface TaskRowProps {
@@ -121,6 +122,9 @@ export function TaskRow({
       >
         {task.important && <span className="row__important" aria-hidden="true" />}
         {task.title}
+        {exitKind === 'done' && (
+          <StrikeLine seed={task.id} onDone={() => state.settle([task.id])} />
+        )}
       </span>
 
       {task.kind === 'recurring' && task.streak >= 2 && (
