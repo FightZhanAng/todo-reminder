@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, WINDOW_ARG_PREFIX, type WindowKind } from '../shared/ipc'
+import { IPC, WINDOW_ARG_PREFIX, type NoticeId, type WindowKind } from '../shared/ipc'
 import type { Command, TaskDraft } from '../shared/commands'
 import type { Snapshot } from '../shared/ipc'
 
@@ -44,6 +44,8 @@ if (kind === 'quickadd') {
     setHotkey: (hotkey: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke(IPC.setHotkey, hotkey),
     window: (action: 'hide' | 'open-data-dir' | 'quit'): Promise<void> =>
-      ipcRenderer.invoke(IPC.window, action)
+      ipcRenderer.invoke(IPC.window, action),
+    dismissNotice: (id: NoticeId): Promise<Snapshot> =>
+      ipcRenderer.invoke(IPC.dismissNotice, id)
   })
 }

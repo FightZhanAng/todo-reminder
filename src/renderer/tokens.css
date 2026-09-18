@@ -1,0 +1,45 @@
+/*
+ * 颜色 token。规格 §9.3 定了「冷白台面 + 墨色 + 一条暖色紧迫度刻度」，
+ * §13 给了浅/暗两组取值。
+ *
+ * 暗色**不用 filter: invert()** —— 那会把 --urgency-overdue 的红反转成绿，
+ * 语义直接反了。两组值逐个给。
+ *
+ * color-scheme 让原生控件（type=date / type=time / 滚动条）跟着主题走，
+ * 少了它，深色界面里会冒出几个白底的原生日期选择器。
+ */
+:root {
+  color-scheme: light dark;
+
+  --paper: #f4f5f2;
+  --surface: #ffffff;
+  --ink: #14181b;
+  --ink-muted: #6b7169;
+  --ink-faint: #8a9088;
+  --rule: #e1e4dc;
+  --rule-strong: #d9dcd3;
+  --urgency-none: #d2d6cc;
+  --urgency-soon: #b4741a;
+  --urgency-overdue: #b4322f;
+  --row-hover: #eef0ea;
+  --urgency-soon-bg: rgba(180, 116, 26, 0.08);
+  --shadow-pop: 0 6px 20px rgba(20, 24, 27, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #16191b;
+    --surface: #1e2224;
+    --ink: #e8eae6;
+    --ink-muted: #9aa096;
+    --ink-faint: #767c73;
+    --rule: #2c3134;
+    --rule-strong: #3a4044;
+    --urgency-none: #3d4448;
+    --urgency-soon: #d09434;
+    --urgency-overdue: #d9534f;
+    --row-hover: #23282b;
+    --urgency-soon-bg: rgba(208, 148, 52, 0.12);
+    --shadow-pop: 0 6px 20px rgba(0, 0, 0, 0.5);
+  }
+}

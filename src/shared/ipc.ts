@@ -23,7 +23,9 @@ export const IPC = {
   /** 快速添加窗 → main：取消 */
   quickAddCancel: 'todo:quickadd-cancel',
   /** renderer → main：改全局快捷键。**先试注册，成功才写设置** */
-  setHotkey: 'todo:set-hotkey'
+  setHotkey: 'todo:set-hotkey',
+  /** renderer → main：关掉某类提示（本次运行内不再显示） */
+  dismissNotice: 'todo:dismiss-notice'
 } as const
 
 /** 窗口 / 进程级动作。不改数据，所以不走命令层 */
@@ -68,6 +70,8 @@ export interface TodoApi {
   /** 返回的不是 `Snapshot`，只是一个结果 —— 显示值由广播更新，错误由这个结果当场反馈 */
   setHotkey(hotkey: string): Promise<{ ok: boolean }>
   window(action: WindowAction): Promise<void>
+  /** 关掉某类提示（本次运行内不再显示），返回更新后的快照 */
+  dismissNotice(id: NoticeId): Promise<Snapshot>
 }
 
 /** 快速添加窗专用，只有两个口 */

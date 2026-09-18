@@ -1,0 +1,506 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* 系统字体，零字体文件、零加载、离线必然可用（规格 §9.4） */
+  font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  /* 常驻小工具：默认不让选文本，输入框自己开回来 */
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* 时刻与数字：等宽，可以竖着扫读一天的节奏（规格 §9.4） */
+.mono {
+  font-family: 'Cascadia Mono', Consolas, ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 5px 7px;
+  width: 100%;
+}
+
+/* 不做 outline: none —— 焦点环是键盘可用的前提（规格 §9.9） */
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---- 应用外壳：顶栏 / 看板 / 底栏 三段（规格 §6.1） ---- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.topbar__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.topbar__date {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.iconbutton {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-muted);
+}
+
+.iconbutton:hover {
+  background: var(--row-hover);
+  color: var(--ink);
+}
+
+.bottombar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+}
+
+.bottombar__link {
+  color: var(--ink-muted);
+}
+
+.bottombar__link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.bottombar__state {
+  color: var(--ink-faint);
+}
+
+.bottombar__state--off {
+  color: var(--urgency-soon);
+}
+
+/* ---- 分段与行 ---- */
+
+.section {
+  padding-bottom: 2px;
+}
+
+.section__label {
+  padding: 9px 12px 3px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+
+/* 「逾期」段的存在感：标题转朱红（规格 §6.2） */
+.section--overdue .section__label {
+  color: var(--urgency-overdue);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  min-height: 30px;
+}
+
+.row:hover {
+  background: var(--row-hover);
+}
+
+.row--cursor {
+  background: var(--row-hover);
+}
+
+/* 键盘游标：行最左侧 2px 竖线（规格 §6.6） */
+.row__cursor {
+  flex: none;
+  width: 2px;
+  align-self: stretch;
+  background: transparent;
+}
+
+.row--cursor .row__cursor {
+  background: var(--ink);
+}
+
+/* 紧迫度色条：界面里唯一的颜色信号（规格 §9.3） */
+.row__bar {
+  flex: none;
+  width: 3px;
+  align-self: stretch;
+}
+
+.row__bar[data-urgency='none'] {
+  background: var(--urgency-none);
+}
+
+.row__bar[data-urgency='soon'] {
+  background: var(--urgency-soon);
+}
+
+.row__bar[data-urgency='overdue'] {
+  background: var(--urgency-overdue);
+}
+
+.row__clock {
+  flex: none;
+  width: 40px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.row__clock--overdue {
+  color: var(--urgency-overdue);
+}
+
+.row__dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: 12px;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: 50%;
+}
+
+.row__dot:hover {
+  border-color: var(--ink);
+}
+
+.row__title {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.row__important {
+  flex: none;
+  width: 3px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--ink-muted);
+}
+
+.row__streak {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.row__more {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  color: var(--ink-faint);
+  opacity: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.row:hover .row__more,
+.row--cursor .row__more,
+.row__more[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.row__more:hover {
+  background: var(--rule);
+  color: var(--ink);
+}
+
+/* 退场中的行不接受交互 —— 别让人点到一条正在消失的行（规格 §12） */
+.row--exiting {
+  pointer-events: none;
+}
+
+/* 已删除：灰色 + 撤销按钮，等 5 秒 */
+.row--removed {
+  opacity: 0.55;
+}
+
+.row__undo {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.row__undo:hover {
+  color: var(--ink);
+  border-color: var(--ink-muted);
+}
+
+/* 完成退场时整行降透明度再移出（规格 §9.5 第二拍） */
+.row--done {
+  animation: row-leave 260ms ease-out 260ms forwards;
+}
+
+@keyframes row-leave {
+  to {
+    opacity: 0.35;
+    transform: translateY(-4px);
+  }
+}
+
+/* ---- 空状态 ---- */
+
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--ink-muted);
+}
+
+.empty__hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* ---- 顶部提示条 / 一次性提示 ---- */
+
+.noticebar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--rule);
+  border-left: 3px solid var(--urgency-soon);
+  background: var(--urgency-soon-bg);
+  font-size: 12px;
+}
+
+.noticebar--error {
+  border-left-color: var(--urgency-overdue);
+}
+
+.noticebar__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.noticebar__action {
+  flex: none;
+  color: var(--ink-muted);
+  text-decoration: underline;
+}
+
+.noticebar__more {
+  flex: none;
+  color: var(--ink-faint);
+}
+
+.noticebar__close {
+  flex: none;
+  width: 18px;
+  color: var(--ink-faint);
+  line-height: 1;
+}
+
+.flash {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 34px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.flash__inner {
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+/* ---- popover 菜单 ---- */
+
+.rowmenu {
+  position: fixed;
+  z-index: 20;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+
+.rowmenu__item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.rowmenu__item:hover {
+  background: var(--row-hover);
+}
+
+.rowmenu__item--danger {
+  color: var(--urgency-overdue);
+}
+
+/* ---- 覆盖式视图（编辑器 / 设置）---- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.page__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 12px 16px;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field--stack {
+  display: block;
+}
+
+.field__label {
+  flex: none;
+  width: 76px;
+  color: var(--ink-muted);
+}
+
+.field--stack .field__label {
+  display: block;
+  width: auto;
+  margin-bottom: 5px;
+}
+
+.field__control {
+  flex: 1;
+  min-width: 0;
+}
+
+.field__hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.segmented {
+  display: flex;
+  gap: 4px;
+}
+
+.segmented__item {
+  padding: 3px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.segmented__item--on {
+  border-color: var(--ink-muted);
+  background: var(--row-hover);
+  color: var(--ink);
+}

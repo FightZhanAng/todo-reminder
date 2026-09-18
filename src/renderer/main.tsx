@@ -1,2 +1,14 @@
-// 渲染层入口占位。第二期在此挂载 React 应用。
-console.log('renderer placeholder')
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App'
+import './tokens.css'
+import './styles.css'
+
+const root = document.getElementById('root')
+if (!root) throw new Error('缺少 #root 挂载点')
+
+createRoot(root).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+)

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { applyCommand, type Command, type CommandResult, type TaskDraft } from '../shared/commands'
-import { IPC, type Snapshot, type WindowAction } from '../shared/ipc'
+import { IPC, type NoticeId, type Snapshot, type WindowAction } from '../shared/ipc'
 import type { NoticeCenter } from './notices'
 import type { Scheduler } from './scheduler'
 import type { Store } from './store'
@@ -136,4 +136,10 @@ export function registerIpc(ctx: AppContext): void {
   })
 
   ipcMain.on(IPC.quickAddCancel, () => ctx.quickAdd.hide())
+
+  ipcMain.handle(IPC.dismissNotice, (_e, id: NoticeId) => {
+    ctx.notices.dismiss(id)
+    broadcast(ctx)
+    return buildSnapshot(ctx)
+  })
 }

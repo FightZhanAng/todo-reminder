@@ -2,6 +2,7 @@ import { app, BrowserWindow, powerMonitor } from 'electron'
 import { join } from 'node:path'
 import { ensureAumidActivator, ensureAumidRegistered } from './aumid'
 import { broadcast, registerIpc, type AppContext } from './ipc'
+import type { Command, CommandResult } from '../shared/commands'
 import { NoticeCenter } from './notices'
 import { Notifier } from './notifier'
 import { Scheduler } from './scheduler'
@@ -100,6 +101,11 @@ if (!app.requestSingleInstanceLock()) {
     // 主题在启动时先对齐一次 —— 设置有可能被改在别处
     applyTheme(store.settings.theme)
 
+    app.setLoginItemSettings({
+      openAtLogin: store.settings.launchAtLogin,
+      path: process.execPath
+    })
+
     scheduler = new Scheduler({
       store,
       isIdle: () =>
@@ -150,10 +156,21 @@ if (!app.requestSingleInstanceLock()) {
       notices,
       windows: () => [mainWindow].filter((w): w is BrowserWindow => w !== null),
       hotkeyRegistered: () => false,
-      afterCommand: () => {
-        // 完成/推迟/推到明天/新建/编辑/删除/设置变更都要立刻重算一次并刷新托盘
+      afterCommand: (cmd: Command, _result: CommandResult) => {
+        // 原规格 §6.4：完成/推迟/推到明天/新建/编辑/删除/设置变更
+        // 都要立刻重算一次并刷新托盘
         scheduler.tick()
         tray.refresh()
+        if (cmd.type !== 'settings:patch') return
+        if (cmd.patch.theme !== undefined) applyTheme(store.settings.theme)
+        if (cmd.patch.launchAtLogin !== undefined) {
+          app.setLoginItemSettings({
+            openAtLogin: store.settings.launchAtLogin,
+            path: process.execPath
+          })
+        }
+        // 注意这里**没有** hotkey 的分支：快捷键走 IPC.setHotkey，
+        // 因为那条路要求先试注册、成功才写设置
       },
       afterPauseChange: () => tray.refresh(),
       setHotkey: () => false,
