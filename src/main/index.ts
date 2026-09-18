@@ -104,7 +104,8 @@ if (!app.requestSingleInstanceLock()) {
     notifier = new Notifier({
       store,
       scheduler,
-      onFocusTask: (taskId) => showMainWindow()
+      // 第二期用 taskId 把窗口定位到具体那条任务；现在只把窗口唤起来
+      onFocusTask: () => showMainWindow()
     })
 
     tray = new TrayController({

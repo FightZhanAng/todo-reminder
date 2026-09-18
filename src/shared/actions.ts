@@ -3,8 +3,13 @@ import type { RecurringTask, RemindableTask, TaskPatch } from './types'
 
 export type TaskAction = 'complete' | 'snooze' | 'tomorrow'
 
-/** 通知按钮的排列顺序。下标即 Notification 的 actionIndex */
-export const ACTION_ORDER: TaskAction[] = ['complete', 'snooze', 'tomorrow']
+/**
+ * 通知按钮的排列顺序。下标即 Notification 的 actionIndex。
+ *
+ * 类型是 `readonly TaskAction[]` 而不是 `TaskAction[]` —— 单一事实来源，
+ * 任何地方都不要硬编码 0/1/2，也**不允许**被 push/splice 改掉。
+ */
+export const ACTION_ORDER: readonly TaskAction[] = ['complete', 'snooze', 'tomorrow']
 
 /**
  * 按钮文案。「推迟」的分钟数必须从设置取 ——

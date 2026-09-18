@@ -28,6 +28,10 @@ function describeWhen(task: RemindableTask, at: number, now: number): string {
   // 提醒点还在将来（提前查看，如面板预览）：用户关心的是任务本身还有多久，
   // 而不是提醒点还有多久 —— 截止型两者相差一个提前量。
   const left = task.dueAt - now
+  // 防御性分支：合法配置下走不到。能到这里说明 `at > now + 60s`，
+  // 而 `at = dueAt - leadMin×60s`，于是 `left >= 60s + leadMin×60s`，
+  // 只要 `leadMin >= 0` 就不可能小于 60s。留着是为了 `leadMin` 为负
+  // （理论上允许「截止后才提醒」）时不至于算出「还有 0 分钟」。
   if (left < 60_000) return '现在'
 
   const minutes = Math.round(left / 60_000)
@@ -42,6 +46,9 @@ function describeWhen(task: RemindableTask, at: number, now: number): string {
 export function missedSummary(due: DueEntry[], max: number): { title: string; body: string } {
   const total = due.length
   const shown = due.slice(0, max).map((e) => e.task.title)
-  const body = total > max ? `${shown.join(' · ')} 等 ${total} 件` : shown.join(' · ')
+  const head = shown.join(' · ')
+  // 用 filter(Boolean) 而不是三元拼字符串：`max <= 0` 时 shown 为空，
+  // 直接拼会得到「 等 N 件」这种前导空格。
+  const body = total > max ? [head, `等 ${total} 件`].filter(Boolean).join(' ') : head
   return { title: `有 ${total} 件事错过了`, body }
 }

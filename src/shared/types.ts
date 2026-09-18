@@ -47,6 +47,15 @@ export interface RecurringTask extends TaskBase {
   /** dayKey */
   lastDoneDay: string | null
   streak: number
+  /**
+   * 「推迟」后的下一个提醒点。
+   *
+   * 与截止型同名同义，但**判定方式不同**：周期任务的常规提醒点由规则算出、
+   * 与 `snoozeUntil` 无关，所以不能像截止型那样无条件取 `snoozeUntil`
+   * （那样会永久屏蔽掉之后的每一天）。这里只在 `snoozeUntil` 不早于今天时
+   * 才认它 —— 详见 `remind.ts` 的 `recurringRemindAt`。
+   */
+  snoozeUntil: number | null
 }
 
 export interface SomedayTask extends TaskBase {

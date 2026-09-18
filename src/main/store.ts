@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
-  closeSync, existsSync, fsyncSync, mkdirSync, openSync,
+  closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync,
   readFileSync, renameSync, unlinkSync, writeFileSync
 } from 'node:fs'
 import { dirname } from 'node:path'
@@ -65,10 +65,20 @@ export class Store {
       console.error('[store] 数据文件损坏：', err)
       const backup = `${this.file}.corrupt-${Date.now()}`
       try {
+        // 优先 rename（坏文件从原地移走，之后 flush 不会碰到它）
         renameSync(this.file, backup)
         this.corruptBackup = backup
       } catch (renameErr) {
-        console.error('[store] 备份损坏文件失败：', renameErr)
+        // rename 失败（例如坏文件被别的进程占着）时退化成复制。
+        // 宁可留下重复的一份，也不能让后续 flush() 把用户唯一的那份坏数据
+        // 覆盖掉 —— 那会毁掉「还能人工抢救」这个承诺。
+        try {
+          copyFileSync(this.file, backup)
+          this.corruptBackup = backup
+          console.error('[store] rename 备份失败，已改用复制：', renameErr)
+        } catch (copyErr) {
+          console.error('[store] 备份损坏文件失败（rename 与 copy 都不行）：', copyErr)
+        }
       }
       return { version: FILE_VERSION, tasks: [], settings: { ...DEFAULT_SETTINGS } }
     }

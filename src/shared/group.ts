@@ -2,7 +2,7 @@ import { MISS_GRACE_MS } from './defaults'
 import { matchesDay } from './recurrence'
 import type { DueEntry } from './remind'
 import { dayKey, nextDayStart, startOfDay } from './time'
-import type { DeadlineTask, RecurringTask, Settings, Task } from './types'
+import type { DeadlineTask, RecurringTask, Task } from './types'
 
 export interface TodayGroups {
   /** 已逾期未完成，置顶 */
@@ -18,8 +18,12 @@ export interface TodayGroups {
 /**
  * 今日看板的四段分组。段顺序即展示顺序。
  * 清单池（someday）不出现在任何一段 —— 它只出现在收件箱里。
+ *
+ * 不收 `settings`：分组只看任务的日期字段，与任何设置无关。
+ * 原来带着 `settings` 形参是给第二期预留的，一直没人用 —— 与其留个
+ * 会让人误以为「分组受设置影响」的死参数，不如等真需要时再加。
  */
-export function groupToday(tasks: Task[], settings: Settings, now: number): TodayGroups {
+export function groupToday(tasks: Task[], now: number): TodayGroups {
   const today = startOfDay(now)
   const tomorrow = nextDayStart(now)
   const active = tasks.filter((t) => t.deletedAt === null)

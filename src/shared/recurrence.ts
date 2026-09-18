@@ -1,7 +1,15 @@
 import { addDays, dayIndex, daysInMonth, startOfDay } from './time'
 import type { RecurrenceRule, Weekday } from './types'
 
-/** 逐日推进的上限。覆盖 every ≤ 3 的月度规则 + 跳周末的所有组合绰绰有余 */
+/**
+ * 逐日推进的上限。覆盖 every ≤ 3 的月度规则 + 跳周末的所有组合绰绰有余。
+ *
+ * **已知边界（不报错，静默返回 null）**：月度规则 every > 13 时
+ * （`every × 31 > 400`），`nextOccurrence` / `expandRecurrence` 会在 400 天内
+ * 找不到命中日而返回 `null` / 空数组，而不是抛错。计划只覆盖 `every ≤ 3`，
+ * 这个上限是刻意为「不做无界循环」付出的代价 —— 真要支持更大间隔，
+ * 应把上限改成按规则计算而不是逐日推进。
+ */
 const SEARCH_LIMIT_DAYS = 400
 
 /** `day` 与 `anchor` 都必须是某天的 00:00 */

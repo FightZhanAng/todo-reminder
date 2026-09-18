@@ -28,11 +28,34 @@ export function remindAtOf(task: RemindableTask, settings: Settings, now: number
   return recurringRemindAt(task, now)
 }
 
-/** 周期任务：今天命中且今天还没做过，才给提醒点 */
+/**
+ * 周期任务的提醒点。
+ *
+ * 「推迟」必须在这里单独处理 —— 截止型的提醒点存在任务字段里（`dueAt - leadMin`），
+ * 所以 `snoozeUntil` 可以直接顶替它；而周期任务的提醒点是由规则**算**出来的，
+ * 每天都有一个新值，直接顶替等于把之后的每一天都屏蔽掉。
+ *
+ * 判据是「`snoozeUntil` 不早于今天」。一次比较同时解决三件事：
+ *
+ * 1. 推迟点没到时返回它 → 推迟期内不弹；
+ * 2. 推迟点弹过之后仍然返回它，而它此时等于 `firedFor`，被 `dueNow` 的幂等
+ *    规则挡掉 → 当天不再重复。**这一步是关键**：若此处改回常规提醒点，它
+ *    ≤ now 且 ≠ firedFor，会立刻再弹一次 —— 这正是修复前周期任务点「推迟」
+ *    原地重弹的原因（`firedFor` 被清空 + 提醒点回落到 09:00）；
+ * 3. 到了第二天，旧的 `snoozeUntil` 早于新一天的零点，自然失效、规则恢复 ——
+ *    不需要任何清理代码。
+ *
+ * 判据为什么不是「晚于 base」：那样 23:55 推迟到次日 00:05 会在跨天瞬间失效
+ * （新一天的 base 必然晚于那个推迟点），推迟被整整吞掉一天。用「不早于今天」
+ * 则只跟当天的零点比，跨午夜照样生效。
+ */
 function recurringRemindAt(task: RecurringTask, now: number): number | null {
   if (task.lastDoneDay === dayKey(now)) return null
   const today = startOfDay(now)
   if (!matchesDay(task.rule, startOfDay(task.createdAt), today)) return null
+
+  if (task.snoozeUntil !== null && task.snoozeUntil > today) return task.snoozeUntil
+
   return atTimeOfDay(today, task.remindTime)
 }
 

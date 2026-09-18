@@ -42,7 +42,7 @@ export class TrayController {
   }
 
   private remainingCount(): number {
-    const g = groupToday([...this.deps.store.tasks], this.deps.store.settings, Date.now())
+    const g = groupToday([...this.deps.store.tasks], Date.now())
     return g.overdue.length + g.upcoming.length + g.anytime.length + g.recurring.length
   }
 
@@ -52,7 +52,7 @@ export class TrayController {
 
   private tooltip(): string {
     const now = Date.now()
-    const g = groupToday([...this.deps.store.tasks], this.deps.store.settings, now)
+    const g = groupToday([...this.deps.store.tasks], now)
     const count = g.overdue.length + g.upcoming.length + g.anytime.length + g.recurring.length
     if (count === 0) return '待办提醒 · 今天清空了'
     const next = g.upcoming[0]

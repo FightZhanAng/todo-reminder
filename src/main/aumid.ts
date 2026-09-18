@@ -27,19 +27,21 @@ const ACTIVATOR_LABEL = 'Electron Notification Activator'
  * 而正在跑的进程收不到任何事件。
  *
  * 做法：先在 CLSID 树下按默认值搜 label 找到候选键，再逐个比对 LocalServer32。
- */
-/**
- * 成功扫到过一次就缓存下来，之后不再扫整棵 CLSID 树。
- * - 未扫过 / 上次没扫到：保持 undefined，每次调用都重试；
- * - 扫到：存成字符串，之后直接返回，避免每个 tick（TICK_MS=10s）
- *   都跑一次 `reg query /s` 全树扫描把调度拖慢。
+ * 只剩一个候选就直接用；出现多个（同机有多个 Electron 应用的 exe 路径相同时
+ * 理论上可能）时取第一个 —— 已知局限，真出问题再收紧。
  *
- * 失败的返回值（null）**绝不缓存** —— 否则会卡死在「再也
- * 不重试」，错过 Electron 稍后写下自己 CLSID 键的时机。
- * 这正是「启动时没扫到、show() 前再扫一次」兜底能成立的
- * 前提：失败时永远保留重试能力。
+ * **缓存策略**：成功扫到过一次就缓存下来，之后不再扫整棵 CLSID 树。
+ * - 未扫过 / 上次没扫到：保持 undefined，下次调用继续重试；
+ * - 扫到：存成字符串，之后直接返回，避免每次要发通知前都跑一次
+ *   `reg query /s` 全树扫描（同步执行，会把主进程卡住）；
+ * - 失败的返回值（null）**绝不缓存** —— 否则会卡死在「再也不重试」，
+ *   错过 Electron 稍后写下自己 CLSID 键的时机。这正是「启动时没扫到、
+ *   `show()` 前再扫一次」兜底能成立的前提：失败时永远保留重试能力。
+ *
+ * 代价要知情：只要一直扫不到，每次出通知前都会同步跑一次全树扫描。
+ * 这是刻意选的 —— 扫不到的窗口期通常只出现在刚启动那一小会儿。
  */
-let cachedActivatorClsid: string | null | undefined = undefined
+let cachedActivatorClsid: string | undefined = undefined
 
 function findElectronActivatorClsid(): string | null {
   if (cachedActivatorClsid !== undefined) return cachedActivatorClsid

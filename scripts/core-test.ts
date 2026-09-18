@@ -27,6 +27,27 @@ function at(y: number, m: number, d: number, h = 0, min = 0, s = 0): number {
 
 import { DEFAULT_SETTINGS } from '../src/shared/defaults'
 import type { DeadlineTask, RecurringTask, SomedayTask, Task } from '../src/shared/types'
+import { addDays, atTimeOfDay, dayIndex, dayKey, daysInMonth, parseHM, startOfDay } from '../src/shared/time'
+import { expandRecurrence, matchesDay, nextOccurrence } from '../src/shared/recurrence'
+import type { RecurrenceRule } from '../src/shared/types'
+import { dueNow, isRemindable, remindAtOf } from '../src/shared/remind'
+import { groupMissed, groupToday } from '../src/shared/group'
+import { inQuietHours } from '../src/shared/quiet'
+import { ACTION_ORDER, actionLabel, actionPatch } from '../src/shared/actions'
+import { describeTask, missedSummary } from '../src/shared/notifyText'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Store } from '../src/main/store'
+import { Scheduler } from '../src/main/scheduler'
+import { formatClock, nextDayStart } from '../src/shared/time'
+import {
+  DEFAULT_LEAD_MIN,
+  DEFAULT_SNOOZE_MIN,
+  FILE_VERSION,
+  MISS_GRACE_MS,
+  TICK_MS
+} from '../src/shared/defaults'
 
 function deadline(patch: Partial<DeadlineTask> = {}): DeadlineTask {
   return {
@@ -63,6 +84,7 @@ function recurring(patch: Partial<RecurringTask> = {}): RecurringTask {
     remindTime: '09:00',
     lastDoneDay: null,
     streak: 0,
+    snoozeUntil: null,
     ...patch
   }
 }
@@ -85,8 +107,6 @@ function someday(patch: Partial<SomedayTask> = {}): SomedayTask {
 /** 测试用的设置基线 */
 const S = { ...DEFAULT_SETTINGS, allDayRemindTime: '09:00', defaultLeadMin: 15 }
 
-import { addDays, atTimeOfDay, dayIndex, dayKey, daysInMonth, parseHM, startOfDay } from '../src/shared/time'
-
 console.log('\n--- time.ts ---')
 check('dayKey 格式', dayKey(at(2026, 9, 16, 15, 30)), '2026-09-16')
 check('dayKey 跨午夜前', dayKey(at(2026, 9, 16, 23, 59)), '2026-09-16')
@@ -104,9 +124,6 @@ check('parseHM 正常', JSON.stringify(parseHM('09:05')), JSON.stringify({ h: 9,
 check('parseHM 垃圾输入不炸', JSON.stringify(parseHM('abc')), JSON.stringify({ h: 0, m: 0 }))
 check('dayIndex 相邻两天差 1', dayIndex(at(2026, 9, 16)) - dayIndex(at(2026, 9, 15)), 1)
 check('dayIndex 跨月差 1', dayIndex(at(2026, 9, 1)) - dayIndex(at(2026, 8, 31)), 1)
-
-import { expandRecurrence, matchesDay, nextOccurrence } from '../src/shared/recurrence'
-import type { RecurrenceRule } from '../src/shared/types'
 
 console.log('\n--- recurrence.ts ---')
 {
@@ -179,8 +196,6 @@ console.log('\n--- recurrence.ts ---')
   check('expandRecurrence count 为 0', expandRecurrence(daily, anchor, anchor, 0).length, 0)
 }
 
-import { dueNow, isRemindable, remindAtOf } from '../src/shared/remind'
-
 console.log('\n--- remind.ts ---')
 check('isRemindable 排除清单池', isRemindable(someday()), false)
 check('isRemindable 认得截止型', isRemindable(deadline()), true)
@@ -223,9 +238,6 @@ console.log('\n--- dueNow ---')
 console.log('\n--- 骨架自检 ---')
 check('测试链路可用', 1 + 1, 2)
 
-import { groupMissed, groupToday } from '../src/shared/group'
-import { inQuietHours } from '../src/shared/quiet'
-
 console.log('\n--- group.ts ---')
 {
   const now = at(2026, 9, 16, 12, 0)   // 周三
@@ -244,7 +256,7 @@ console.log('\n--- group.ts ---')
     overdueTask, todayTimed, todayAllDay, tomorrowTimed, doneToday, gone,
     dueToday, notToday, doneRecurring, someday()
   ]
-  const g = groupToday(all, S, now)
+  const g = groupToday(all, now)
 
   check('逾期只有 1 条', g.overdue.map((t) => t.id).join(','), 'o1')
   check('接下来只有带时刻的今日任务', g.upcoming.map((t) => t.id).join(','), 'u1')
@@ -255,7 +267,7 @@ console.log('\n--- group.ts ---')
   check('明天的任务不在今天', g.upcoming.concat(g.anytime).some((t) => t.id === 'u2'), false)
 
   const imp = deadline({ id: 'a2', dueAt: at(2026, 9, 16), allDay: true, important: true })
-  check('今天随时：important 优先', groupToday([todayAllDay, imp], S, now).anytime.map((t) => t.id).join(','), 'a2,a1')
+  check('今天随时：important 优先', groupToday([todayAllDay, imp], now).anytime.map((t) => t.id).join(','), 'a2,a1')
 }
 
 console.log('\n--- groupMissed ---')
@@ -291,9 +303,6 @@ console.log('\n--- quiet.ts ---')
   check('未配置免打扰时段', inQuietHours(S, at(2026, 9, 16, 23, 0)), false)
   check('起止相同视为不启用', inQuietHours({ ...S, quietHours: { start: '09:00', end: '09:00' } }, at(2026, 9, 16, 9, 0)), false)
 }
-
-import { ACTION_ORDER, actionLabel, actionPatch } from '../src/shared/actions'
-import { describeTask, missedSummary } from '../src/shared/notifyText'
 
 console.log('\n--- actions.ts ---')
 {
@@ -376,11 +385,6 @@ console.log('\n--- notifyText.ts ---')
   check('超过上限时标题仍是总数', many.title, '有 5 件事错过了')
 }
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Store } from '../src/main/store'
-
 console.log('\n--- store.ts ---')
 {
   const dir = mkdtempSync(join(tmpdir(), 'todo-store-'))
@@ -443,8 +447,6 @@ console.log('\n--- store.ts ---')
 
   rmSync(dir, { recursive: true, force: true })
 }
-
-import { Scheduler } from '../src/main/scheduler'
 
 console.log('\n--- scheduler.ts ---')
 {
@@ -571,6 +573,152 @@ console.log('\n--- scheduler.ts ---')
   check('全局关闭通知后不弹', b6, 0)
 
   for (const d of cleanups) rmSync(d, { recursive: true, force: true })
+}
+
+// ---------------------------------------------------------------------------
+// 2026-09-18 补齐：承重常量、剩余时间工具、免打扰整点端点
+// （评审留下的 deferred 小账，补完第一期就不再挂账）
+// ---------------------------------------------------------------------------
+
+console.log('\n--- 承重常量（静默改值 typecheck 抓不到）---')
+{
+  check('FILE_VERSION = 1', FILE_VERSION, 1)
+  check('TICK_MS = 10 秒', TICK_MS, 10_000)
+  check('MISS_GRACE_MS = 10 分钟', MISS_GRACE_MS, 600_000)
+  check('DEFAULT_LEAD_MIN = 15', DEFAULT_LEAD_MIN, 15)
+  check('DEFAULT_SNOOZE_MIN = 10', DEFAULT_SNOOZE_MIN, 10)
+
+  check('默认 schemaVersion = FILE_VERSION', DEFAULT_SETTINGS.schemaVersion, FILE_VERSION)
+  check('默认不自启', DEFAULT_SETTINGS.launchAtLogin, false)
+  check('默认开通知', DEFAULT_SETTINGS.notifyEnabled, true)
+  check('默认有提示音', DEFAULT_SETTINGS.soundEnabled, true)
+  check('默认全天提醒 09:00', DEFAULT_SETTINGS.allDayRemindTime, '09:00')
+  check('默认提前量 = DEFAULT_LEAD_MIN', DEFAULT_SETTINGS.defaultLeadMin, DEFAULT_LEAD_MIN)
+  check('默认推迟 = DEFAULT_SNOOZE_MIN', DEFAULT_SETTINGS.snoozeMinutes, DEFAULT_SNOOZE_MIN)
+  check('默认不开免打扰时段', DEFAULT_SETTINGS.quietHours, null)
+  check('默认空闲免打扰开', DEFAULT_SETTINGS.quietWhenIdle, true)
+  check('默认空闲阈值 5 分钟', DEFAULT_SETTINGS.idleThresholdMin, 5)
+  check('默认主题 auto', DEFAULT_SETTINGS.theme, 'auto')
+  check('默认推送关闭', DEFAULT_SETTINGS.push.enabled, false)
+  check('默认推送未配置密钥', DEFAULT_SETTINGS.push.configured, false)
+  check('默认推送渠道 serverchan', DEFAULT_SETTINGS.push.channel, 'serverchan')
+  check('默认推送时机 awayOnly', DEFAULT_SETTINGS.push.when, 'awayOnly')
+  check('默认离开判定 5 分钟', DEFAULT_SETTINGS.push.awayIdleMin, 5)
+  check('默认快捷键 Control+Alt+T', DEFAULT_SETTINGS.hotkey, 'Control+Alt+T')
+}
+
+console.log('\n--- 时间工具的剩余导出 ---')
+{
+  check('formatClock 补零', formatClock(at(2026, 9, 16, 9, 5)), '09:05')
+  check('formatClock 午夜', formatClock(at(2026, 9, 16, 0, 0)), '00:00')
+  check('formatClock 深夜', formatClock(at(2026, 9, 16, 23, 59)), '23:59')
+  check('nextDayStart 是次日零点', nextDayStart(at(2026, 9, 16, 23, 59, 59)), at(2026, 9, 17))
+  check('nextDayStart 白天也是次日零点', nextDayStart(at(2026, 9, 16, 12, 0)), at(2026, 9, 17))
+  check('nextDayStart 跨月', nextDayStart(at(2026, 9, 30, 12, 0)), at(2026, 10, 1))
+}
+
+console.log('\n--- 免打扰：同日时段的整点端点 ---')
+{
+  const sameDay = { ...DEFAULT_SETTINGS, quietHours: { start: '09:00', end: '18:00' } }
+  check('起点含（09:00 整）', inQuietHours(sameDay, at(2026, 9, 16, 9, 0)), true)
+  check('终点不含（18:00 整）', inQuietHours(sameDay, at(2026, 9, 16, 18, 0)), false)
+  check('终点前一分钟算（17:59）', inQuietHours(sameDay, at(2026, 9, 16, 17, 59)), true)
+  check('起点前一分钟不算（08:59）', inQuietHours(sameDay, at(2026, 9, 16, 8, 59)), false)
+}
+
+console.log('\n--- 错过批次的宽限期端点 ---')
+{
+  const now = at(2026, 9, 16, 12, 0)
+  const entry = (minAgo: number) => ({ task: deadline({ id: `g${minAgo}` }), at: now - minAgo * 60_000 })
+  check('刚好 10 分钟归 fresh', groupMissed([entry(10)], now).fresh.length, 1)
+  check('超过 10 分钟归 missed', groupMissed([entry(10.1)], now).missed.length, 1)
+  check('9 分钟归 fresh', groupMissed([entry(9)], now).fresh.length, 1)
+}
+
+console.log('\n--- 聚合通知文案的边界 ---')
+{
+  const one = [{ task: deadline({ id: 'm1' }), at: 0 }]
+  check('标题带总数', missedSummary(one, 0).title, '有 1 件事错过了')
+  check('max 足够时不追加「等 N 件」', missedSummary(one, 3).body, '交周报')
+  // max=0 时 shown 为空，修复前会拼出「 等 1 件」这种前导空格
+  check('max=0 不产生前导空格', missedSummary(one, 0).body, '等 1 件')
+  check('多条时用 · 连接', missedSummary(
+    [{ task: deadline({ id: 'a', title: '甲' }), at: 0 }, { task: deadline({ id: 'b', title: '乙' }), at: 0 }],
+    5
+  ).body, '甲 · 乙')
+}
+
+// ---------------------------------------------------------------------------
+// 2026-09-18 修复：周期任务的「推迟」
+//
+// 修复前：actionPatch('snooze') 无差别地写 snoozeUntil + 清 firedFor，
+// 而 recurringRemindAt 不读 snoozeUntil → 提醒点回落到今天的 remindTime，
+// 它 ≤ now 且 ≠ firedFor → 下一个 tick（10 秒内）原地重弹，推迟完全失效。
+// RED 证据见 docs/superpowers/../scripts/manual-check.md 的探针输出。
+// ---------------------------------------------------------------------------
+console.log('\n--- 周期任务的「推迟」---')
+{
+  const opts = { snoozeMinutes: 10 }
+
+  // 基准：09:00 的提醒点已过，now = 09:05
+  const now = at(2026, 9, 16, 9, 5)
+  check('基准：提醒点 = 今天 09:00', remindAtOf(recurring(), S, now), at(2026, 9, 16, 9, 0))
+
+  const patch = actionPatch(recurring(), 'snooze', now, opts)
+  check('推迟：写 snoozeUntil = now + 10 分钟', patch.snoozeUntil, at(2026, 9, 16, 9, 15))
+  check('推迟：清空 firedFor', patch.firedFor, null)
+
+  const snoozed = recurring({ snoozeUntil: at(2026, 9, 16, 9, 15) })
+  check('推迟后提醒点 = snoozeUntil', remindAtOf(snoozed, S, now), at(2026, 9, 16, 9, 15))
+  check('推迟后此刻不弹', dueNow([snoozed], S, now).length, 0)
+  check('推迟后 09:14 不弹', dueNow([snoozed], S, at(2026, 9, 16, 9, 14)).length, 0)
+  check('推迟点到时弹一次', dueNow([snoozed], S, at(2026, 9, 16, 9, 15)).length, 1)
+
+  // 弹过之后调度器回填 firedFor = snoozeUntil
+  const fired = recurring({
+    snoozeUntil: at(2026, 9, 16, 9, 15),
+    firedFor: at(2026, 9, 16, 9, 15)
+  })
+  check('推迟弹过后当天不再弹（09:20）', dueNow([fired], S, at(2026, 9, 16, 9, 20)).length, 0)
+  check('推迟弹过后当天不再弹（23:59）', dueNow([fired], S, at(2026, 9, 16, 23, 59)).length, 0)
+  check('次日提醒点回到次日 09:00', remindAtOf(fired, S, at(2026, 9, 17, 8, 0)), at(2026, 9, 17, 9, 0))
+  check('次日 09:00 正常弹', dueNow([fired], S, at(2026, 9, 17, 9, 0)).length, 1)
+
+  // 边界：23:55 推迟到次日 00:05，跨午夜必须仍然生效
+  const cross = recurring({
+    remindTime: '23:55',
+    snoozeUntil: at(2026, 9, 17, 0, 5)
+  })
+  check('跨午夜推迟：推起点未被吞掉', remindAtOf(cross, S, at(2026, 9, 16, 23, 56)), at(2026, 9, 17, 0, 5))
+  check('跨午夜推迟：次日 00:05 弹一次', dueNow([cross], S, at(2026, 9, 17, 0, 5)).length, 1)
+  // 已知取舍：推迟点落到次日 00:05 后，它会一直「不早于今天」，于是**次日**
+  // 那个 23:55 的实例被并入、当天不再单独弹（人在这天已经在 00:05 被提醒过）。
+  // 再下一天 snoozeUntil 早于新一天零点，自动失效、规则恢复。
+  const crossFired = { ...cross, firedFor: at(2026, 9, 17, 0, 5) }
+  check(
+    '跨午夜推迟：推迟点所在当天不再重复',
+    remindAtOf(crossFired, S, at(2026, 9, 17, 12, 0)),
+    at(2026, 9, 17, 0, 5)
+  )
+  check('跨午夜推迟：当晚不再弹', dueNow([crossFired], S, at(2026, 9, 17, 23, 55)).length, 0)
+  check(
+    '跨午夜推迟：再下一天回到规则（23:55）',
+    remindAtOf(crossFired, S, at(2026, 9, 18, 12, 0)),
+    at(2026, 9, 18, 23, 55)
+  )
+  check('跨午夜推迟：再下一天 23:55 正常弹', dueNow([crossFired], S, at(2026, 9, 18, 23, 55)).length, 1)
+
+  // 已完成 / 今天不该做时，推迟不改变 null
+  check(
+    '今天已做：推迟不改变 null',
+    remindAtOf(recurring({ lastDoneDay: '2026-09-16', snoozeUntil: at(2026, 9, 16, 9, 15) }), S, now),
+    null
+  )
+  check('截止型不受影响：仍无条件用 snoozeUntil', remindAtOf(
+    deadline({ snoozeUntil: at(2026, 9, 16, 9, 15) }),
+    S,
+    now
+  ), at(2026, 9, 16, 9, 15))
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
