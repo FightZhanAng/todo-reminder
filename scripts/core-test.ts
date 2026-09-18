@@ -1223,5 +1223,70 @@ console.log('\n--- commands.ts ---')
   rmSync(dir, { recursive: true, force: true })
 }
 
+import { NoticeCenter } from '../src/main/notices'
+import type { Notice } from '../src/shared/ipc'
+
+console.log('\n--- notices.ts ---')
+{
+  const notice = (id: Notice['id'], level: Notice['level'], at: number): Notice => ({
+    id, level, text: `${id}@${at}`, at
+  })
+
+  const nc = new NoticeCenter()
+  check('空中心 head 为 null', nc.head(), null)
+  check('空中心 list 为空', nc.list().length, 0)
+
+  nc.raise(notice('notify-failed', 'warn', 100))
+  check('raise 之后有一条', nc.list().length, 1)
+  check('has 认得出', nc.has('notify-failed'), true)
+  check('没提过的 id 为 false', nc.has('write-failed'), false)
+
+  // 同 id 覆盖，不新增
+  nc.raise(notice('notify-failed', 'warn', 200))
+  check('同 id 覆盖不新增', nc.list().length, 1)
+  check('同 id 取最新', nc.head()!.at, 200)
+
+  nc.raise(notice('write-failed', 'error', 150))
+  check('不同 id 会新增', nc.list().length, 2)
+  check('最严重优先：error 在前', nc.head()!.id, 'write-failed')
+  check('list 的顺序稳定', nc.list().map((n) => n.id).join(','), 'write-failed,notify-failed')
+
+  // 同级别按时间新的在前。
+  // 先把 notify-failed 收回：它只被 raise 过、从没 dismiss / clear，会一直留在
+  // list 里；不收回的话下面三条断言（排序串 / dismiss 后的串 / list 长度）都会多出它。
+  nc.clear('notify-failed')
+  nc.clear('write-failed')
+  nc.raise(notice('write-failed', 'error', 300))
+  nc.raise(notice('corrupt-backup', 'error', 400))
+  check('同级别新的在前', nc.list().map((n) => n.id).join(','), 'corrupt-backup,write-failed')
+
+  // dismiss
+  nc.dismiss('corrupt-backup')
+  check('dismiss 后不在 list 里', nc.list().map((n) => n.id).join(','), 'write-failed')
+  check('dismiss 后 has 为 false', nc.has('corrupt-backup'), false)
+  nc.raise(notice('corrupt-backup', 'error', 500))
+  check('dismiss 过的 id 再 raise 也不显示（本次运行内）', nc.has('corrupt-backup'), false)
+  check('但内容确实被更新了', nc.list().length, 1)
+
+  // clear 会重置 dismiss
+  nc.clear('corrupt-backup')
+  check('clear 后不再被压制', nc.has('corrupt-backup'), false)
+  nc.raise(notice('corrupt-backup', 'warn', 600))
+  check('clear 之后 raise 能显示', nc.has('corrupt-backup'), true)
+
+  // clear 未提及的 id 不炸
+  nc.clear('write-failed')
+  check('clear 之后该条消失', nc.has('write-failed'), false)
+
+  check('action 原样带出', (() => {
+    const c = new NoticeCenter()
+    c.raise({
+      id: 'corrupt-backup', level: 'error', text: '坏了', at: 1,
+      action: { label: '打开所在文件夹', windowAction: 'open-data-dir' }
+    })
+    return c.head()!.action!.windowAction
+  })(), 'open-data-dir')
+}
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
 if (failures > 0) process.exitCode = 1
