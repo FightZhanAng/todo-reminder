@@ -10,6 +10,8 @@ export interface RowMenuProps {
   items: MenuItem[]
   /** 期望的落点（一般是 ⋮ 按钮的右下角），会在窗口内自动收边 */
   anchor: { x: number; y: number }
+  /** 触发按钮（一般是 ⋮）。点它不算「外部」，用于 toggle 关闭（Minor 4） */
+  anchorEl?: HTMLElement | null
   onClose: () => void
 }
 
@@ -22,7 +24,7 @@ export interface RowMenuProps {
  * 用 position: fixed 而不是 absolute：列表容器有 overflow-y: auto，
  * absolute 的菜单会被裁掉。
  */
-export function RowMenu({ items, anchor, onClose }: RowMenuProps): JSX.Element {
+export function RowMenu({ items, anchor, anchorEl, onClose }: RowMenuProps): JSX.Element {
   const ref = useRef<HTMLDivElement | null>(null)
   const [pos, setPos] = useState({ x: anchor.x, y: anchor.y, visible: false })
 
@@ -35,11 +37,20 @@ export function RowMenu({ items, anchor, onClose }: RowMenuProps): JSX.Element {
     const x = Math.max(margin, Math.min(anchor.x - width, window.innerWidth - width - margin))
     const y = Math.max(margin, Math.min(anchor.y, window.innerHeight - height - margin))
     setPos({ x, y, visible: true })
+    // 打开即聚焦首项：点开后直接按 Enter / Space 就能激活（Important 2 ②），
+    // 也方便键盘在菜单内 Tab 移动
+    el.querySelector<HTMLButtonElement>('button')?.focus()
   }, [anchor.x, anchor.y])
 
   useEffect(() => {
     const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+      if (!ref.current) return
+      const target = e.target as Node
+      // 菜单自身 / 触发按钮（⋮）都不算「外部」——
+      // 前者正常，后者用于 toggle（再点一次 ⋮ 关闭，Minor 4）
+      if (ref.current.contains(target)) return
+      if (anchorEl && anchorEl.contains(target)) return
+      onClose()
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
@@ -53,7 +64,7 @@ export function RowMenu({ items, anchor, onClose }: RowMenuProps): JSX.Element {
       window.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey, true)
     }
-  }, [onClose])
+  }, [onClose, anchorEl])
 
   return (
     <div

@@ -1,4 +1,4 @@
-import { useState, type JSX, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import type { Task } from '@shared/types'
 import { urgencyOf } from '@shared/urgency'
 import { RowMenu, type MenuItem } from './RowMenu'
@@ -14,6 +14,8 @@ export interface TaskRowProps {
   cursor: boolean
   highlight: boolean
   exitKind?: 'done' | 'removed'
+  /** 菜单开合时通知上层（Board 据此挂起看板全局快捷键）。可选，便于复用 */
+  onMenuOpenChange?: (open: boolean) => void
 }
 
 export function TaskRow({
@@ -23,9 +25,11 @@ export function TaskRow({
   clockOverdue = false,
   cursor,
   highlight,
-  exitKind
+  exitKind,
+  onMenuOpenChange
 }: TaskRowProps): JSX.Element {
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null)
+  const moreRef = useRef<HTMLButtonElement | null>(null)
   const urgency = urgencyOf(task, state.now)
   const removed = exitKind === 'removed'
 
@@ -59,12 +63,23 @@ export function TaskRow({
           { label: '删除', danger: true, onSelect: () => state.remove(task) }
         ]
 
+  // 退场行的交互契约（两种行不一样，别混）：
+  // - done：520ms 内整行不可点击（挂 .row--exiting → pointer-events:none），
+  //   避免用户点到一条正在消失的行（规格 §9.5）。
+  // - removed：5 秒撤销窗口内必须可点击 —— 不挂 .row--exiting，
+  //   否则「撤销」按钮在鼠标下完全不可达，撤销功能等于没做。
   const classes = ['row']
   if (cursor) classes.push('row--cursor')
   if (highlight) classes.push('row--highlight')
-  if (exitKind) classes.push('row--exiting')
+  if (exitKind === 'done') classes.push('row--exiting')
+  // removed：只降透明度（.row--removed），交互保持开启，让「撤销」可点
   if (removed) classes.push('row--removed')
   if (exitKind === 'done') classes.push('row--done')
+
+  // 菜单开合 → 通知上层（Board 用来挂起看板快捷键，Important 2）
+  useEffect(() => {
+    onMenuOpenChange?.(anchor !== null)
+  }, [anchor, onMenuOpenChange])
 
   return (
     <li className={classes.join(' ')} data-task-id={task.id}>
@@ -112,6 +127,7 @@ export function TaskRow({
         </button>
       ) : (
         <button
+          ref={moreRef}
           type="button"
           className="row__more"
           aria-label="更多操作"
@@ -119,14 +135,22 @@ export function TaskRow({
           onClick={(e) => {
             e.stopPropagation()
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-            setAnchor({ x: r.right, y: r.bottom })
+            // toggle：再点一次 ⋮ 关闭（Minor 4）。外部点击仍由 RowMenu 关闭
+            setAnchor((prev) => (prev === null ? { x: r.right, y: r.bottom } : null))
           }}
         >
           ⋮
         </button>
       )}
 
-      {anchor !== null && <RowMenu items={items} anchor={anchor} onClose={() => setAnchor(null)} />}
+      {anchor !== null && (
+        <RowMenu
+          items={items}
+          anchor={anchor}
+          anchorEl={moreRef.current}
+          onClose={() => setAnchor(null)}
+        />
+      )}
     </li>
   )
 }

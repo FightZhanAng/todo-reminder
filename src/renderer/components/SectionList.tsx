@@ -13,6 +13,8 @@ export interface SectionListProps {
   state: AppState
   cursorId: string | null
   highlightId: string | null
+  /** 透传给行，行内菜单开合时通知上层（Board 挂起看板快捷键，Important 2） */
+  onMenuOpenChange?: (open: boolean) => void
 }
 
 /** 段内为空则整段消失（连标题一起），四段全空由上一层换成空状态（规格 §6.2） */
@@ -22,7 +24,8 @@ export function SectionList({
   tasks,
   state,
   cursorId,
-  highlightId
+  highlightId,
+  onMenuOpenChange
 }: SectionListProps): JSX.Element | null {
   if (tasks.length === 0) return null
 
@@ -39,7 +42,8 @@ export function SectionList({
             state,
             cursor: cursorId === task.id,
             highlight: highlightId === task.id,
-            exitKind: exitingById.get(task.id)
+            exitKind: exitingById.get(task.id),
+            onMenuOpenChange
           }
           return withClock ? (
             <TimeCard key={task.id} {...shared} />

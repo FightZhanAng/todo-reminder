@@ -39,10 +39,12 @@ export function Board({ state }: { state: AppState }): JSX.Element {
 
   const [cursor, setCursor] = useState(0)
   const [highlightId, setHighlightId] = useState<string | null>(null)
+  // 是否有行内菜单打开（某行 ⋮ 展开的 RowMenu）。菜单打开时挂起看板快捷键（Important 2）
+  const [menuOpen, setMenuOpen] = useState(false)
 
-  // 列表变短时把游标夹回范围内
+  // 列表变短时把游标夹回范围内（上下界都夹住，避免空列表按 ↓ 留下 -1，Minor 3）
   useEffect(() => {
-    setCursor((c) => (c >= flat.length ? Math.max(0, flat.length - 1) : c))
+    setCursor((c) => (c < 0 ? 0 : c >= flat.length ? Math.max(0, flat.length - 1) : c))
   }, [flat.length])
 
   // 从通知点进来：滚进视野 + 2 秒高亮。找不到就什么都不做（规格 §6.7）
@@ -58,13 +60,17 @@ export function Board({ state }: { state: AppState }): JSX.Element {
 
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // 菜单打开时挂起看板全局快捷键：Enter/Backspace/s/t 不能改到游标行，
+      // 方向键不能乱动看板游标（Important 2）。Esc 由 RowMenu 接管关闭
+      if (menuOpen) return
       if (isTypingTarget(e.target)) return
       const current = flat[cursor]
 
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
-          setCursor((c) => Math.min(c + 1, flat.length - 1))
+          // 下界夹 0：空列表按 ↓ 也只能是 0，不会变 -1（Minor 3）
+          setCursor((c) => Math.max(0, Math.min(c + 1, flat.length - 1)))
           return
         case 'ArrowUp':
           e.preventDefault()
@@ -111,7 +117,7 @@ export function Board({ state }: { state: AppState }): JSX.Element {
           return
       }
     },
-    [cursor, flat, tasks, state, snapshot]
+    [cursor, flat, tasks, state, snapshot, menuOpen]
   )
 
   useEffect(() => {
@@ -141,6 +147,7 @@ export function Board({ state }: { state: AppState }): JSX.Element {
               state={state}
               cursorId={cursorId}
               highlightId={highlightId}
+              onMenuOpenChange={setMenuOpen}
             />
           ))
         )}
