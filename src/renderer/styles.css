@@ -292,6 +292,12 @@ ul {
   opacity: 1;
 }
 
+/* 焦点环是键盘可用的前提：opacity:0 会连带把 :focus-visible 的焦点环一起透明掉，
+   键盘 Tab 到「更多」时屏幕上什么都不亮。这里在 focus-visible 时强制显示 */
+.row__more:focus-visible {
+  opacity: 1;
+}
+
 .row__more:hover {
   background: var(--rule);
   color: var(--ink);
@@ -503,4 +509,19 @@ ul {
   border-color: var(--ink-muted);
   background: var(--row-hover);
   color: var(--ink);
+}
+
+/* 从通知点进来时那 2 秒的高亮（规格 §6.7） */
+.row--highlight {
+  background: var(--urgency-soon-bg);
+}
+
+/* 段标题是 h2，但视觉上是 11px 的小标签 —— 去掉默认的粗体与间距 */
+.section__label {
+  margin: 0;
+  font-weight: 500;
+}
+
+.topbar__title {
+  margin: 0;
 }

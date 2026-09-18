@@ -54,3 +54,6 @@ export function dayIndex(ts: number): number {
   const d = new Date(ts)
   return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000)
 }
+
+/** 星期几的显示名。下标即 `Date.getDay()`（0 = 周日）—— 与 types.ts 的 Weekday 同一约定 */
+export const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
