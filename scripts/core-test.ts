@@ -57,6 +57,7 @@ import {
 } from '../src/shared/defaults'
 import { SOON_WINDOW_MS, urgencyOf } from '../src/shared/urgency'
 import { hotkeyFromEvent, isValidHotkey, normalizeHotkey } from '../src/shared/hotkey'
+import { EXIT_DONE_MS, EXIT_REMOVED_MS, exitDurationMs, mergeExiting } from '../src/shared/exit'
 
 function deadline(patch: Partial<DeadlineTask> = {}): DeadlineTask {
   return {
@@ -837,6 +838,103 @@ console.log('\n--- hotkey.ts ---')
     hotkeyFromEvent(ev({ key: 'ArrowUp', ctrlKey: true })), 'Control+Up')
   check('Dead 键忽略',
     hotkeyFromEvent(ev({ key: 'Dead', ctrlKey: true })), null)
+}
+
+console.log('\n--- exit.ts ---')
+{
+  const now = at(2026, 9, 16, 16, 0)
+  // 变更前的样子（未完成、未删除）
+  const before = deadline({ id: 'a', title: 'A' })
+  // 变更后的样子（已完成）—— 快照里那条
+  const afterDone = deadline({ id: 'a', title: 'A', completedAt: now })
+  // 变更后（软删）
+  const afterRemoved = deadline({ id: 'a', title: 'A', deletedAt: now })
+  const other = deadline({ id: 'b', title: 'B' })
+
+  check('时长：done', exitDurationMs('done'), EXIT_DONE_MS)
+  check('时长：removed', exitDurationMs('removed'), EXIT_REMOVED_MS)
+
+  const none = mergeExiting([afterDone, other], [], now)
+  check('空 exiting：原样返回', none.tasks.map((t) => t.id).join(','), 'a,b')
+  check('空 exiting：已完成的那条保持已完成',
+    (none.tasks[0] as DeadlineTask).completedAt, now)
+  check('空 exiting：没有过期项', none.expired.length, 0)
+
+  // done：替换回变更前的版本
+  const done = mergeExiting(
+    [afterDone, other],
+    [{ task: before, kind: 'done', startedAt: now - 100 }],
+    now
+  )
+  check('done：条数不变（替换而不是插入）', done.tasks.length, 2)
+  check('done：completedAt 被盖回 null', (done.tasks[0] as DeadlineTask).completedAt, null)
+  check('done：位置不变（还在第 0 位）', done.tasks[0].id, 'a')
+  check('done：未过期', done.expired.length, 0)
+  check('done：没被动的任务原样', (done.tasks[1] as DeadlineTask).completedAt, null)
+
+  // removed：替换回未删除的版本（这样 groupToday 才会把它排回原来的段）
+  const removed = mergeExiting(
+    [afterRemoved, other],
+    [{ task: before, kind: 'removed', startedAt: now - 100 }],
+    now
+  )
+  check('removed：deletedAt 被盖回 null', removed.tasks[0].deletedAt, null)
+
+  // 过期：不替换，并报出来
+  const expiredDone = mergeExiting(
+    [afterDone],
+    [{ task: before, kind: 'done', startedAt: now - EXIT_DONE_MS }],
+    now
+  )
+  check('刚好到时长：过期', expiredDone.expired.join(','), 'a')
+  check('过期后不再替换', (expiredDone.tasks[0] as DeadlineTask).completedAt, now)
+
+  const nearly = mergeExiting(
+    [afterDone],
+    [{ task: before, kind: 'done', startedAt: now - EXIT_DONE_MS + 1 }],
+    now
+  )
+  check('差 1ms：仍算未过期', nearly.expired.length, 0)
+
+  const removedLong = mergeExiting(
+    [afterRemoved],
+    [{ task: before, kind: 'removed', startedAt: now - EXIT_DONE_MS - 1 }],
+    now
+  )
+  check('removed 的窗口比 done 长得多', removedLong.expired.length, 0)
+
+  // current 里已经没有这个 id
+  const gone = mergeExiting([other], [{ task: before, kind: 'done', startedAt: now }], now)
+  check('目标已不在列表里：报过期', gone.expired.join(','), 'a')
+  check('目标已不在列表里：不复活', gone.tasks.map((t) => t.id).join(','), 'b')
+
+  // 同 id 重复登记
+  const dup = mergeExiting(
+    [afterDone],
+    [
+      { task: before, kind: 'done', startedAt: now },
+      { task: before, kind: 'done', startedAt: now }
+    ],
+    now
+  )
+  check('重复登记只替换一次', dup.tasks.length, 1)
+  check('重复的那条报过期', dup.expired.join(','), 'a')
+
+  // 多条混合：一条替换 + 一条过期 + 一条不在列表里
+  const afterDoneB = deadline({ id: 'b', title: 'B', completedAt: now })
+  const mixed = mergeExiting(
+    [afterDone, afterDoneB],
+    [
+      { task: before, kind: 'done', startedAt: now - 10 },
+      { task: deadline({ id: 'b', title: 'B' }), kind: 'done', startedAt: now - EXIT_DONE_MS - 1 },
+      { task: deadline({ id: 'c' }), kind: 'done', startedAt: now }
+    ],
+    now
+  )
+  check('混合：a 被盖回未完成', (mixed.tasks[0] as DeadlineTask).completedAt, null)
+  check('混合：b 已过期所以保持已完成', (mixed.tasks[1] as DeadlineTask).completedAt, now)
+  check('混合：过期的单列出来', mixed.expired.slice().sort().join(','), 'b,c')
+  check('混合：输出仍只有两条（不插入新行）', mixed.tasks.length, 2)
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
