@@ -1061,6 +1061,49 @@ console.log('\n--- commands.ts ---')
   check('edit 不复活已软删的任务', byId(deadlineId)!.deletedAt, now)
   run({ type: 'task:restore', id: deadlineId })
 
+  // ---- task:edit 保留同类型完成态（审查补的断言，原题 88 条里零覆盖）----
+  // 周期任务今天已做完 → 同类型 edit 改标题 → lastDoneDay / streak 必须保留，firedFor 必须清
+  const rEdit = run({
+    type: 'task:create',
+    draft: { kind: 'recurring', title: '周期完成态', important: false, rule: { freq: 'daily', every: 1, skipWeekend: false }, remindTime: '09:00' }
+  }).touchedTaskId!
+  store.updateTask(rEdit, { lastDoneDay: '2026-09-16', streak: 3, firedFor: at(2026, 9, 16, 9, 0) })
+  run({
+    type: 'task:edit', id: rEdit,
+    draft: { kind: 'recurring', title: '周期完成态（改）', important: false, rule: { freq: 'daily', every: 1, skipWeekend: false }, remindTime: '09:00' }
+  })
+  const rAfter = byId(rEdit) as RecurringTask
+  // 判别性：buildTask 会把这两者写成 null / 0，若回填丢失这里会 FAIL
+  check('同类型 edit：周期 lastDoneDay 保留', rAfter.lastDoneDay, '2026-09-16')
+  check('同类型 edit：周期 streak 保留（不为 0）', rAfter.streak, 3)
+  // firedFor 仍清（提醒时刻可能改过，旧的已提醒标记不成立，必须重新具备提醒资格）
+  check('同类型 edit：周期 firedFor 仍被清', rAfter.firedFor, null)
+
+  // 已完成的截止型 → 同类型 edit → completedAt 保留（否则变回未完成、重新进分组）
+  const dEdit = run({
+    type: 'task:create',
+    draft: { kind: 'deadline', title: '完成的截止', important: false, dueDay: at(2026, 9, 16), allDay: true }
+  }).touchedTaskId!
+  run({ type: 'task:complete', id: dEdit })
+  const dDoneAt = (byId(dEdit) as DeadlineTask).completedAt
+  run({
+    type: 'task:edit', id: dEdit,
+    draft: { kind: 'deadline', title: '完成的截止（改）', important: false, dueDay: at(2026, 9, 16), allDay: true }
+  })
+  // 判别性：buildTask 会把它写成 null，若回填丢失这里会 FAIL（dDoneAt === now，非 null）
+  check('同类型 edit：已完成截止型 completedAt 保留', (byId(dEdit) as DeadlineTask).completedAt, dDoneAt)
+
+  // 跨类型切换：完成态不残留（保持 buildTask 重建语义，carryCompletion 不跨类型）
+  const crossSrc = run({
+    type: 'task:create',
+    draft: { kind: 'deadline', title: '要转去清单池', important: false, dueDay: at(2026, 9, 16), allDay: true }
+  }).touchedTaskId!
+  run({ type: 'task:complete', id: crossSrc })
+  run({ type: 'task:edit', id: crossSrc, draft: { kind: 'someday', title: '转去清单池', important: false } })
+  const crossBack = byId(crossSrc)!
+  check('跨类型 edit：kind 变 someday', crossBack.kind, 'someday')
+  check('跨类型 edit：不残留 completedAt', 'completedAt' in crossBack, false)
+
   // ---- 业务性失败 ----
   // 上面几段把 deadlineId / somedayId 的类型来回切过，这里另起两条干净的
   const freshSomeday = run({ type: 'task:create', draft: { kind: 'someday', title: '干净清单', important: false } }).touchedTaskId!

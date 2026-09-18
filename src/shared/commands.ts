@@ -79,6 +79,10 @@ export interface CommandResult {
  * `createdAt` 由调用方传入而不是取 `now`：编辑时它是**周期规则的锚点**
  * （`matchesDay(rule, startOfDay(createdAt), …)`），重建它会悄悄搬动整个规则的相位。
  * `deletedAt` 同理 —— 编辑一条已软删的任务不该把它复活。
+ *
+ * `lastDoneDay` / `streak`（周期）与 `completedAt`（截止）也由本函数**重置为
+ * 「未完成」的默认值**：这些完成态不在 draft 里，也不该让渲染层传。它们对
+ * 新建任务天然正确；但对「同类型编辑」需要被回填 —— 见 `carryCompletion`。
  */
 export function buildTask(
   settings: Settings,
@@ -167,8 +171,11 @@ function route(store: CommandStore, cmd: Command, now: number): CommandResult {
     case 'task:edit': {
       const old = findTask(store, cmd.id)
       if (!old) return notFound(cmd.id)
-      // 保留 id 与 createdAt，其余按 draft 重建；deletedAt 保留原值
-      const next = buildTask(store.settings, cmd.draft, now, old.id, old.createdAt, old.deletedAt)
+      // 保留 id / createdAt / deletedAt（buildTask 已接管），并按同类型回填完成态
+      const next = carryCompletion(
+        old,
+        buildTask(store.settings, cmd.draft, now, old.id, old.createdAt, old.deletedAt)
+      )
       if (store.replaceTask(next) === null) return notFound(cmd.id)
       return { ok: true, touchedTaskId: old.id }
     }
@@ -248,6 +255,33 @@ function route(store: CommandStore, cmd: Command, now: number): CommandResult {
 
 function findTask(store: CommandStore, id: string): Task | undefined {
   return store.tasks.find((t) => t.id === id)
+}
+
+/**
+ * 同类型 edit 时，把「草稿里没有、但属于完成态」的字段从旧任务回填到新建任务。
+ *
+ * 为什么需要它：`buildTask` 故意把 `lastDoneDay` / `streak` / `completedAt`
+ * 重置成「未完成」的默认值（draft 里没有这些字段，也不该让渲染层传）。但用户改
+ * 一条**今天已经做完**的周期任务的标题，显然不希望它「被重开」——`lastDoneDay`
+ * 回到 null 会让 `remind.ts` 的今日门控失效、`firedFor` 被 buildTask 清成 null
+ * 又让幂等挡板失效，同一条今天做过的提醒会再弹一次；`streak` 直接归零是可见的
+ * 数据丢失。
+ *
+ * **只在同一类型内回填**：跨类型切换（如截止型 → 清单池）时这些字段本不适用，
+ * 保持 buildTask 的整条重建语义，不做回填。
+ *
+ * `firedFor` 是**有意不回填**的例外：编辑可能改了提醒时刻（dueAt / leadMin /
+ * remindTime），旧的「已提醒过」标记不再成立，任务必须重新具备提醒资格。
+ */
+function carryCompletion(old: Task, next: Task): Task {
+  if (old.kind !== next.kind) return next
+  if (old.kind === 'recurring') {
+    ;(next as RecurringTask).lastDoneDay = (old as RecurringTask).lastDoneDay
+    ;(next as RecurringTask).streak = (old as RecurringTask).streak
+  } else if (old.kind === 'deadline') {
+    ;(next as DeadlineTask).completedAt = (old as DeadlineTask).completedAt
+  }
+  return next
 }
 
 function opts(store: CommandStore): { snoozeMinutes: number } {
