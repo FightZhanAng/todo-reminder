@@ -55,7 +55,7 @@ Set-Location 'D:\WorkBuddy\我的工作台\todo-reminder'
 
 | # | 步骤 | 期望 | 结果 |
 |---|---|---|---|
-| 1 | 启动应用 | 托盘出现方框图标，框里有横线 | ⏳ 待人工 |
+| 1 | 启动应用 | 托盘出现方框图标，框里有横线 | ⚠️ **曾失败 → 已修，待你复看**：原实现用 SVG 交给 `nativeImage`，而 Electron 不支持 SVG → 静默得到 0×0 空图，托盘里什么都看不见（tooltip 与右键菜单却正常）。已改为自绘 PNG（`shared/trayIcon.ts`），见下方「第 1 项为什么看不见」 |
 | 2 | 悬浮托盘图标 | tooltip 显示「待办提醒 · 今天 N 件」 | ⏳ 待人工 |
 | 3 | 右键托盘 → 暂停提醒 → 30 分钟 | 菜单项变成可点的「恢复提醒」 | ⏳ 待人工 |
 | 4 | 点「恢复提醒」 | 变回不可点的「提醒运行中」 | ⏳ 待人工 |
@@ -172,3 +172,34 @@ tomcato 按标题点完之后：
 它 ≤ now 且 ≠ `firedFor` → 一个 tick 内就重弹并把 `firedFor` 写成 `10:31:00`。
 现在 `firedFor` 保持 `null`，说明 `remindAtOf` 正确返回了 10:42:52（> now，被
 `dueNow` 的 `at > now` 挡掉）。**缺陷在真机上闭合。**
+
+---
+
+### 托盘图标看不见：`nativeImage` 不支持 SVG（2026-09-18 实测，第 1 项的根因）
+
+原来的 `src/main/icons.ts` 注释写着「用 SVG 转 PNG 生成」，但**代码从没转过** ——
+它只是把 SVG 字符串塞进 `data:image/svg+xml;base64,…` 交给 `createFromDataURL`。
+
+实测（Electron 43.3.0 / Windows 10 19045，`app.whenReady()` 后直接测）：
+
+```
+SVG  dataURL -> isEmpty=true   size={"width":0,"height":0}   ← 空图！
+PNG  dataURL -> isEmpty=false  size={"width":1,"height":1}
+Bitmap       -> isEmpty=false  size={"width":16,"height":16}
+```
+
+**不抛异常、不打警告、`Tray` 构造也没报错**，所以现场表现是「托盘里没有图标，但
+tooltip 和右键菜单都正常」—— 极易误判成图标和任务栏撞色、或 Win11 把图标折叠了。
+一行确诊：`nativeImage.createFromDataURL(url).isEmpty()`。
+
+**修法**：新增 `src/shared/trayIcon.ts` 自己光栅化（4×4 超采样；圆角矩形用有符号距离、
+线段用胶囊距离）+ 自己编最小 PNG（`node:zlib` + CRC32）。`src/main/icons.ts` 只剩一层
+`nativeImage.createFromBuffer(trayIconPng(kind, color))`。
+
+放在 `shared/` 而不是 `main/` 是有意的：它**不 import electron**，于是能在无头测试里
+直接断言像素 —— 这是唯一可靠的回归保护，因为「透明」和「白色」在截图里长得一模一样。
+新增 17 条断言（PNG 签名 / IHDR 宽高 / 位深 / colorType / IEND / 非透明像素数在合理区间 /
+颜色正确 / 两种形态不同 / 半透明外框存在）。
+
+顺带把源图从 16×16 提到 **32×32**（`TRAY_ICON_SCALE = 2`）：Windows 托盘在 150% DPI 下
+标称 24×24，拿 32 缩下去比拿 16 放大清晰得多。

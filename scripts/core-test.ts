@@ -35,6 +35,13 @@ import { groupMissed, groupToday } from '../src/shared/group'
 import { inQuietHours } from '../src/shared/quiet'
 import { ACTION_ORDER, actionLabel, actionPatch } from '../src/shared/actions'
 import { describeTask, missedSummary } from '../src/shared/notifyText'
+import {
+  TRAY_ICON_SCALE,
+  TRAY_ICON_SIZE,
+  parseHexColor,
+  trayIconBitmap,
+  trayIconPng
+} from '../src/shared/trayIcon'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -719,6 +726,63 @@ console.log('\n--- 周期任务的「推迟」---')
     S,
     now
   ), at(2026, 9, 16, 9, 15))
+}
+
+// ---------------------------------------------------------------------------
+// 2026-09-18 修复：托盘图标看不见
+//
+// 根因：icons.ts 把 SVG 塞进 data URL 交给 nativeImage，而 Electron **不支持 SVG** ——
+// 不报错，静默返回 0×0 的空图（实测 isEmpty() === true），托盘里什么都不显示，
+// 但 tooltip 与右键菜单正常，所以极难定位。
+// 修法：shared/trayIcon.ts 自己光栅化 + 自己编 PNG。下面直接断言像素。
+// ---------------------------------------------------------------------------
+console.log('\n--- 托盘图标：必须是真有像素的 PNG ---')
+{
+  const size = TRAY_ICON_SIZE * TRAY_ICON_SCALE
+  const bmp = trayIconBitmap('pending', '#1B1F23')
+  const alphasOf = (b: Buffer): number[] => {
+    const out: number[] = []
+    for (let i = 3; i < b.length; i += 4) out.push(b[i])
+    return out
+  }
+
+  check('位图字节数 = w×h×4', bmp.length, size * size * 4)
+  const a = alphasOf(bmp)
+  const painted = a.filter((v) => v > 0).length
+  check('画上了东西（非全透明）', painted > 40, true)
+  check('没糊满整张（画的是稀疏图形，不是实心块）', painted < size * size * 0.75, true)
+  check('有实心像素', a.filter((v) => v === 255).length > 20, true)
+  check('有抗锯齿边缘（0<alpha<255）', a.filter((v) => v > 0 && v < 255).length > 20, true)
+
+  let solidIdx = -1
+  for (let i = 3; i < bmp.length; i += 4) {
+    if (bmp[i] === 255) {
+      solidIdx = i - 3
+      break
+    }
+  }
+  const hex = (n: number): string => n.toString(16).padStart(2, '0')
+  check(
+    '实心像素用的是指定颜色 #1B1F23',
+    `${hex(bmp[solidIdx])}${hex(bmp[solidIdx + 1])}${hex(bmp[solidIdx + 2])}`,
+    '1b1f23'
+  )
+
+  check('两种形态的位图不同', trayIconBitmap('clear', '#1B1F23').equals(bmp), false)
+  const semi = alphasOf(trayIconBitmap('clear', '#1B1F23')).filter((v) => v > 70 && v < 130)
+  check('清空形态的半透明外框（0.45）确实存在', semi.length > 20, true)
+
+  const png = trayIconPng('pending', '#1B1F23')
+  check('PNG 签名', png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
+  check('IHDR 宽 = 32', png.readUInt32BE(16), size)
+  check('IHDR 高 = 32', png.readUInt32BE(20), size)
+  check('位深 8', png[24], 8)
+  check('colorType 6（RGBA）', png[25], 6)
+  check('以 IEND 收尾', png.subarray(png.length - 8, png.length - 4).toString('ascii'), 'IEND')
+  check('PNG 不是空壳', png.length > 200, true)
+
+  check('parseHexColor 三位简写', JSON.stringify(parseHexColor('#f0a')), JSON.stringify({ r: 255, g: 0, b: 170 }))
+  check('parseHexColor 非法值退回黑', JSON.stringify(parseHexColor('nope')), JSON.stringify({ r: 0, g: 0, b: 0 }))
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)

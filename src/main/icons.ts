@@ -1,39 +1,30 @@
 import { nativeImage, type NativeImage } from 'electron'
+import { trayIconPng, type TrayIconKind } from '../shared/trayIcon'
 
 /**
  * 托盘图标是一个方框：
  *   还有未完成 → 框里躺着几条横线
  *   今天清空   → 变成一个勾
  *
- * 用 SVG 转 PNG 生成，不依赖美术资源文件。16×16 是 Windows 托盘标准尺寸。
+ * **绝对不要用 SVG。** Electron 的 `nativeImage` 不支持 SVG：
+ * `createFromDataURL('data:image/svg+xml;base64,…')` 不抛错、不警告，静默返回
+ * 一张 0×0 的空图（实测 `isEmpty() === true`、`getSize()` 为 `{0,0}`）。
+ * 后果是**托盘里什么都看不见**，而 tooltip、右键菜单、通知全部正常 ——
+ * 极易误判成「图标颜色太浅」或「系统把新图标折叠了」。2026-09-18 就是这么踩的：
+ * 这个文件的上一版注释写着「用 SVG 转 PNG 生成」，但代码从头到尾没转过，
+ * 只是把 SVG 塞进了 data URL。
+ *
+ * 现在的做法：`shared/trayIcon.ts` 自己光栅化 + 自己编 PNG（纯函数、可无头测试），
+ * 这里只包一层 `nativeImage`。像素断言在 `scripts/core-test.ts` 里。
  */
-function svgToImage(svg: string): NativeImage {
-  return nativeImage.createFromDataURL(
-    `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
-  )
-}
-
-function wrap(inner: string, color: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" color="${color}">${inner}</svg>`
+function build(kind: TrayIconKind, color: string): NativeImage {
+  return nativeImage.createFromBuffer(trayIconPng(kind, color))
 }
 
 export function trayIconPending(color: string): NativeImage {
-  return svgToImage(
-    wrap(
-      `<rect x="2.5" y="4" width="11" height="8.5" rx="2" fill="none" stroke="${color}" stroke-width="1.4"/>
-       <path d="M5 6.8h6" stroke="${color}" stroke-width="1.4" stroke-linecap="round"/>
-       <path d="M5 9.6h4" stroke="${color}" stroke-width="1.4" stroke-linecap="round"/>`,
-      color
-    )
-  )
+  return build('pending', color)
 }
 
 export function trayIconClear(color: string): NativeImage {
-  return svgToImage(
-    wrap(
-      `<rect x="2.5" y="4" width="11" height="8.5" rx="2" fill="none" stroke="${color}" stroke-width="1.4" opacity="0.45"/>
-       <path d="M5.4 8.2 L7.4 10.2 L11 5.8" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`,
-      color
-    )
-  )
+  return build('clear', color)
 }
