@@ -937,5 +937,248 @@ console.log('\n--- exit.ts ---')
   check('混合：输出仍只有两条（不插入新行）', mixed.tasks.length, 2)
 }
 
+import { applyCommand, buildTask } from '../src/shared/commands'
+import type { Command, TaskDraft } from '../src/shared/commands'
+
+console.log('\n--- commands.ts ---')
+{
+  const dir = mkdtempSync(join(tmpdir(), 'todo-cmd-'))
+  const store = new Store(join(dir, 'todo-reminder.json'))
+  const now = at(2026, 9, 16, 16, 0)
+  const run = (cmd: Command) => applyCommand(store, cmd, now)
+  const byId = (id: string) => store.tasks.find((t) => t.id === id)
+  const last = () => store.tasks[store.tasks.length - 1]
+
+  // ---- task:create ----
+  const dl: TaskDraft = {
+    kind: 'deadline', title: '  交周报  ', important: true,
+    dueDay: at(2026, 9, 17), allDay: false, time: '17:30'
+  }
+  const created = run({ type: 'task:create', draft: dl })
+  const deadlineId = created.touchedTaskId!
+  check('create 返回 ok', created.ok, true)
+  check('create 返回 touchedTaskId', typeof deadlineId, 'string')
+  check('create 落在 store 里', store.tasks.length, 1)
+  check('标题被 trim', last().title, '交周报')
+  check('kind 是 deadline', last().kind, 'deadline')
+  check('dueAt 按日期 + 时刻拼', (last() as DeadlineTask).dueAt, at(2026, 9, 17, 17, 30))
+  check('leadMin 缺省取 settings.defaultLeadMin', (last() as DeadlineTask).leadMin, S.defaultLeadMin)
+  check('createdAt = now', last().createdAt, now)
+  check('updatedAt = now', last().updatedAt, now)
+  check('firedFor 为 null', last().firedFor, null)
+  check('pushedFor 为 null', last().pushedFor, null)
+  check('deletedAt 为 null', last().deletedAt, null)
+  check('deadline 的 completedAt 为 null', (last() as DeadlineTask).completedAt, null)
+  check('deadline 的 snoozeUntil 为 null', (last() as DeadlineTask).snoozeUntil, null)
+  check('没写备注时对象上没有 note 键', 'note' in last(), false)
+
+  const allDayDraft: TaskDraft = {
+    kind: 'deadline', title: '买菜', important: false,
+    dueDay: at(2026, 9, 18), allDay: true
+  }
+  run({ type: 'task:create', draft: allDayDraft })
+  check('全天型 dueAt 落在当天 00:00', (last() as DeadlineTask).dueAt, at(2026, 9, 18))
+  check('全天型 allDay 为 true', (last() as DeadlineTask).allDay, true)
+
+  run({ type: 'task:create', draft: { ...allDayDraft, title: '带提前量', leadMin: 30 } })
+  check('显式 leadMin 优先', (last() as DeadlineTask).leadMin, 30)
+
+  run({
+    type: 'task:create',
+    draft: {
+      kind: 'recurring', title: '早上看简历', important: false,
+      rule: { freq: 'daily', every: 1, skipWeekend: true }, remindTime: '09:00'
+    }
+  })
+  check('recurring streak 从 0 开始', (last() as RecurringTask).streak, 0)
+  check('recurring lastDoneDay 为 null', (last() as RecurringTask).lastDoneDay, null)
+  check('recurring snoozeUntil 为 null', (last() as RecurringTask).snoozeUntil, null)
+
+  const recurringId = last().id
+
+  run({ type: 'task:create', draft: { kind: 'someday', title: '想看的书', important: false } })
+  check('someday 没有 dueAt 键', 'dueAt' in last(), false)
+  check('someday 没有 completedAt 键', 'completedAt' in last(), false)
+
+  const somedayId = last().id
+  check('每次 create 都拿到不同 id', somedayId === deadlineId, false)
+  check('create 确实追加而不是覆盖', store.tasks.length, 5)
+
+  // ---- buildTask 的备注 ----
+  const withNote = buildTask(
+    S,
+    { kind: 'someday', title: 'x', note: '  有备注  ', important: false },
+    now, 'n1', now, null
+  )
+  check('备注被 trim', withNote.note, '有备注')
+  const blankNote = buildTask(
+    S,
+    { kind: 'someday', title: 'x', note: '   ', important: false },
+    now, 'n2', now, null
+  )
+  check('空白备注不写进对象', 'note' in blankNote, false)
+
+  // ---- task:edit ----
+  run({
+    type: 'task:edit', id: deadlineId,
+    draft: { kind: 'deadline', title: '交周报（改）', important: false, dueDay: at(2026, 9, 19), allDay: false, time: '10:00', leadMin: 5 }
+  })
+  const edited = byId(deadlineId) as DeadlineTask
+  check('edit 保留 id', edited.id, deadlineId)
+  check('edit 保留 createdAt', edited.createdAt, now)
+  check('edit 换标题', edited.title, '交周报（改）')
+  check('edit 换 dueAt', edited.dueAt, at(2026, 9, 19, 10, 0))
+  check('edit 换 leadMin', edited.leadMin, 5)
+  check('edit 更新 updatedAt', edited.updatedAt, now)
+
+  // edit 要清掉 snooze / firedFor
+  store.updateTask(deadlineId, { snoozeUntil: at(2026, 9, 16, 18, 0), firedFor: at(2026, 9, 16, 17, 0) })
+  run({ type: 'task:edit', id: deadlineId, draft: dl })
+  check('edit 清 snoozeUntil', (byId(deadlineId) as DeadlineTask).snoozeUntil, null)
+  check('edit 清 firedFor', byId(deadlineId)!.firedFor, null)
+
+  // edit 跨类型：清单池 → 截止型，且不留上一个类型的字段
+  run({
+    type: 'task:edit', id: somedayId,
+    draft: { kind: 'deadline', title: '想看的书', important: false, dueDay: at(2026, 9, 20), allDay: true }
+  })
+  const converted = byId(somedayId) as DeadlineTask
+  check('edit 跨类型：kind 变了', converted.kind, 'deadline')
+  check('edit 跨类型：拿到 dueAt', converted.dueAt, at(2026, 9, 20))
+
+  // edit 跨类型：截止型 → 清单池，字段必须被清干净（这是 replaceTask 的存在理由）
+  run({ type: 'task:edit', id: deadlineId, draft: { kind: 'someday', title: '交周报（改）', important: false } })
+  const back = byId(deadlineId)!
+  check('edit 跨类型：kind 回到 someday', back.kind, 'someday')
+  check('回去后不留 dueAt', 'dueAt' in back, false)
+  check('回去后不留 allDay', 'allDay' in back, false)
+  check('回去后不留 leadMin', 'leadMin' in back, false)
+  check('回去后不留 completedAt', 'completedAt' in back, false)
+
+  // edit 保留软删状态
+  run({ type: 'task:remove', id: deadlineId })
+  run({ type: 'task:edit', id: deadlineId, draft: { kind: 'someday', title: '仍然删着', important: false } })
+  check('edit 不复活已软删的任务', byId(deadlineId)!.deletedAt, now)
+  run({ type: 'task:restore', id: deadlineId })
+
+  // ---- 业务性失败 ----
+  // 上面几段把 deadlineId / somedayId 的类型来回切过，这里另起两条干净的
+  const freshSomeday = run({ type: 'task:create', draft: { kind: 'someday', title: '干净清单', important: false } }).touchedTaskId!
+  const freshDeadline = run({
+    type: 'task:create',
+    draft: { kind: 'deadline', title: '干净截止', important: false, dueDay: at(2026, 9, 16), allDay: true }
+  }).touchedTaskId!
+
+  const missing = run({ type: 'task:complete', id: 'nope' })
+  check('不存在的 id：ok 为 false', missing.ok, false)
+  check('不存在的 id：给业务错误文案', missing.error, '任务不存在：nope')
+  check('不存在的 id：不是写盘错误（不该弹提示条）', missing.writeError, undefined)
+  check('不存在的 id：不带 touchedTaskId', missing.touchedTaskId, undefined)
+  check('清单池不能 complete', run({ type: 'task:complete', id: freshSomeday }).ok, false)
+  check('非清单池不能 toToday', run({ type: 'task:toToday', id: freshDeadline }).ok, false)
+  check('清单池不能 snooze', run({ type: 'task:snooze', id: freshSomeday, minutes: 10 }).ok, false)
+  check('清单池不能 postpone', run({ type: 'task:postpone', id: freshSomeday }).ok, false)
+  check('edit 不存在的 id 失败', run({ type: 'task:edit', id: 'nope', draft: { kind: 'someday', title: 'x', important: false } }).ok, false)
+  check('remove 不存在的 id 失败', run({ type: 'task:remove', id: 'nope' }).ok, false)
+  check('失败的命令不改数据', (byId(freshSomeday) as SomedayTask).kind, 'someday')
+
+  // ---- task:complete ----
+  const d2 = run({ type: 'task:create', draft: { kind: 'deadline', title: '完成我', important: false, dueDay: at(2026, 9, 16), allDay: true } })
+  const d2id = d2.touchedTaskId!
+  run({ type: 'task:complete', id: d2id })
+  check('complete 写 completedAt', (byId(d2id) as DeadlineTask).completedAt, now)
+
+  run({ type: 'task:complete', id: recurringId })
+  const rec = byId(recurringId) as RecurringTask
+  check('周期任务 complete 写 lastDoneDay', rec.lastDoneDay, '2026-09-16')
+  check('周期任务 complete 记 streak 1', rec.streak, 1)
+  run({ type: 'task:complete', id: recurringId })
+  check('同一 now 再 complete 不累加 streak', (byId(recurringId) as RecurringTask).streak, 1)
+
+  // 昨天做过 → streak +1
+  store.updateTask(recurringId, { lastDoneDay: '2026-09-15', streak: 4 })
+  run({ type: 'task:complete', id: recurringId })
+  check('昨天做过则 streak +1', (byId(recurringId) as RecurringTask).streak, 5)
+
+  // ---- task:snooze ----
+  const e1 = run({ type: 'task:create', draft: { kind: 'deadline', title: '推迟我', important: false, dueDay: at(2026, 9, 16, 18), allDay: false, time: '18:00' } })
+  const e1id = e1.touchedTaskId!
+  store.updateTask(e1id, { firedFor: at(2026, 9, 16, 17, 45) })
+  run({ type: 'task:snooze', id: e1id, minutes: 10 })
+  check('snooze 写 snoozeUntil', (byId(e1id) as DeadlineTask).snoozeUntil, now + 10 * 60_000)
+  check('snooze 清 firedFor', byId(e1id)!.firedFor, null)
+  run({ type: 'task:snooze', id: e1id, minutes: 0 })
+  check('snooze 分钟数下限为 1', (byId(e1id) as DeadlineTask).snoozeUntil, now + 60_000)
+
+  // ---- task:postpone ----
+  const p1 = run({ type: 'task:create', draft: { kind: 'deadline', title: '推到明天', important: false, dueDay: at(2026, 9, 16, 9), allDay: false, time: '09:58' } })
+  const p1id = p1.touchedTaskId!
+  run({ type: 'task:postpone', id: p1id })
+  const postponed = byId(p1id) as DeadlineTask
+  check('postpone 保持时分挪到明天', postponed.dueAt, at(2026, 9, 17, 9, 58))
+  check('postpone 清 snoozeUntil', postponed.snoozeUntil, null)
+  check('postpone 清 firedFor', byId(p1id)!.firedFor, null)
+
+  const recId2 = run({
+    type: 'task:create',
+    draft: { kind: 'recurring', title: '周期推后', important: false, rule: { freq: 'daily', every: 1, skipWeekend: false }, remindTime: '09:00' }
+  }).touchedTaskId!
+  run({ type: 'task:postpone', id: recId2 })
+  check('周期任务 postpone = 今天跳过', (byId(recId2) as RecurringTask).lastDoneDay, '2026-09-16')
+
+  // ---- task:remove / restore ----
+  run({ type: 'task:remove', id: p1id })
+  check('remove 写 deletedAt', byId(p1id)!.deletedAt, now)
+  store.updateTask(p1id, { firedFor: at(2026, 9, 16, 9, 43) })
+  run({ type: 'task:restore', id: p1id })
+  check('restore 清 deletedAt', byId(p1id)!.deletedAt, null)
+  check('restore 清 firedFor（否则永不提醒）', byId(p1id)!.firedFor, null)
+
+  // ---- task:toToday ----
+  const s2 = run({ type: 'task:create', draft: { kind: 'someday', title: '今天做我', note: '备注', important: true } })
+  const s2id = s2.touchedTaskId!
+  run({ type: 'task:toToday', id: s2id })
+  const today = byId(s2id) as DeadlineTask
+  check('toToday 变成截止型', today.kind, 'deadline')
+  check('toToday 是全天型', today.allDay, true)
+  check('toToday dueAt = startOfDay(now)', today.dueAt, at(2026, 9, 16))
+  check('toToday 保留标题', today.title, '今天做我')
+  check('toToday 保留备注', today.note, '备注')
+  check('toToday 保留 important', today.important, true)
+  check('toToday 保留 id', today.id, s2id)
+  // 23:59 的边界：另起一条**干净的**清单池任务 —— 上面 s2id 已经被转成截止型了，
+  // 对非 someday 的 task:toToday，route 直接判 invalid（第二次调用会 ok:false）。
+  // 这里断言的是真实语义：dueAt 落在当天 00:00，而逾期判据是 dueAt < startOfDay(now)，
+  // 此刻两者**相等** → 它不逾期，进的是「今天随时」段（规格 §14 第 3 条，刻意不特判）。
+  const lateSrc = run({
+    type: 'task:create',
+    draft: { kind: 'someday', title: '夜里翻出来的', important: false }
+  }).touchedTaskId!
+  const late = applyCommand(store, { type: 'task:toToday', id: lateSrc }, at(2026, 9, 16, 23, 59))
+  const lateTask = byId(lateSrc) as DeadlineTask
+  check('23:59 点今天做：dueAt 仍是当天零点', lateTask.dueAt, at(2026, 9, 16))
+  check('23:59 点今天做：返回 ok', late.ok, true)
+  check('23:59 点今天做：dueAt 不早于 startOfDay(now) → 不算逾期',
+    lateTask.dueAt < startOfDay(at(2026, 9, 16, 23, 59)), false)
+
+  // ---- settings:patch ----
+  run({ type: 'settings:patch', patch: { snoozeMinutes: 20, theme: 'dark' } })
+  check('settings:patch 写进去', store.settings.snoozeMinutes, 20)
+  check('settings:patch 写主题', store.settings.theme, 'dark')
+  check('settings:patch 不动没提到的键', store.settings.idleThresholdMin, DEFAULT_SETTINGS.idleThresholdMin)
+  run({ type: 'settings:patch', patch: { push: { channel: 'wecom' } as never } })
+  check('push.channel 改了', store.settings.push.channel, 'wecom')
+  check('push.enabled 没被打回默认', store.settings.push.enabled, DEFAULT_SETTINGS.push.enabled)
+  check('push.when 没被打回默认', store.settings.push.when, DEFAULT_SETTINGS.push.when)
+  check('push.awayIdleMin 没被打回默认', store.settings.push.awayIdleMin, DEFAULT_SETTINGS.push.awayIdleMin)
+
+  // ---- 落盘 ----
+  const persisted = JSON.parse(readFileSync(store.dataFile, 'utf-8')) as { tasks: Task[] }
+  check('命令确实落到了磁盘', persisted.tasks.length, store.tasks.length)
+  check('落盘的条目数与内存一致', persisted.tasks.length > 0, true)
+
+  rmSync(dir, { recursive: true, force: true })
+}
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
 if (failures > 0) process.exitCode = 1

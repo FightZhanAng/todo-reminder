@@ -130,6 +130,25 @@ export class Store {
     return merged
   }
 
+  /**
+   * 整条替换。
+   *
+   * 不能用 `updateTask` 代替 —— 它是 `{ ...old, ...patch }` 的**合并**语义：
+   * 把一条截止型改成清单池时，旧的 dueAt / allDay / leadMin / completedAt
+   * 会原地留下来（`TaskPatch` 刻意 Omit 了 `kind`，所以也根本没法用 patch 改类型）。
+   * 那些字段不会立刻出错，但将来切回截止型时会冒出幽灵默认值。
+   *
+   * 不在这里盖 updatedAt —— 调用方（applyCommand）已经在 buildTask 里用注入的
+   * `now` 盖好了，这样无头测试才能断言到确定的时间戳。
+   */
+  replaceTask(task: Task): Task | null {
+    const index = this.data.tasks.findIndex((t) => t.id === task.id)
+    if (index < 0) return null
+    this.data.tasks[index] = task
+    this.flush()
+    return task
+  }
+
   /** 软删除，可撤销 */
   removeTask(id: string): boolean {
     return this.updateTask(id, { deletedAt: Date.now() }) !== null
