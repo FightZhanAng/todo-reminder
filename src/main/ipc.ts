@@ -46,11 +46,17 @@ export function buildSnapshot(ctx: AppContext): Snapshot {
 }
 
 /**
- * 广播点只有这一个。
+ * 广播点。
  *
- * 第一期「改任务」散在三处（notifier / tray / index），每处都要记得广播 ——
- * 漏一处的症状是「操作生效了但界面不更新」，且只在特定路径出现。
- * 本期全部收敛到 runCommand，广播点因此唯一。
+ * 命令路径（新建/编辑/完成/推迟/…）全部收敛到 `runCommand`，那是主广播点。
+ * 另有几处不经命令层、必须手动广播：
+ *  - `pause` 处理器：暂停/恢复不落盘，不走 Command；
+ *  - `setHotkey` 试注册失败分支：没写设置，但要刷新 `hotkeyRegistered` 状态；
+ *  - 调度器 `notify` 回调：调度器不经命令层，弹通知后要刷新界面；
+ *  - `index.ts` 里窗口首帧 `did-finish-load`：主动推一次，渲染层无需先 get()。
+ *
+ * 漏广播的症状是「操作生效了但界面不更新」，且只在特定路径出现。
+ * 将来要加广播点时，请意识到这个清单、别只在 runCommand 里加。
  */
 export function broadcast(ctx: AppContext): void {
   const snapshot = buildSnapshot(ctx)
@@ -99,8 +105,8 @@ export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(IPC.setHotkey, (_e, hotkey: string) => {
     if (typeof hotkey !== 'string') return { ok: false }
     const ok = ctx.setHotkey(hotkey)
-    if (ok) applyCommand(ctx.store, { type: 'settings:patch', patch: { hotkey } }, Date.now())
-    broadcast(ctx)
+    if (ok) runCommand(ctx, { type: 'settings:patch', patch: { hotkey } })
+    else broadcast(ctx)
     return { ok }
   })
 
