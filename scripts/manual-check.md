@@ -302,3 +302,41 @@ Start-Process '.\node_modules\electron\dist\electron.exe' `
 
 顺带把源图从 16×16 提到 **32×32**（`TRAY_ICON_SCALE = 2`）：Windows 托盘在 150% DPI 下
 标称 24×24，拿 32 缩下去比拿 16 放大清晰得多。
+
+---
+
+## 第三期验收（打包）
+
+一条命令：`pnpm dist`。产物在 `release/`（gitignore）：
+
+| 产物 | 大小 | 说明 |
+|---|---|---|
+| `todo-reminder-0.1.0-setup.exe` | 99.7 MB | NSIS 安装包，per-user，可选安装目录 |
+| `todo-reminder-0.1.0-portable.exe` | 99.5 MB | 便携版。**开机自启别指望它** —— 它跑在临时解压目录里 |
+| `win-unpacked/` | — | 装之前的裸 exe，2026-09-21 这一轮就是拿它验的 |
+
+### 这一轮已经在 `win-unpacked` 上真验过的
+
+| # | 步骤 | 期望 | 结果 |
+|---|---|---|---|
+| 42 | `pnpm dist` | 出 setup + portable，不卡在下载二进制上 | ✅ 2026-09-21：镜像注入生效（`scripts/dist.mjs`），两个目标都出来。第一次跑差点废在 `EPERM: unlink win-unpacked\d3dcompiler_47.dll` —— 打包版还在运行时不能重新打包，先杀进程 |
+| 43 | exe 元数据 | `ProductName` / `FileDescription` = 待办提醒，文件名仍是 ASCII | ✅ `release\win-unpacked\todo-reminder.exe`：`ProductName 待办提醒`、`FileDescription 待办提醒`，`executableName` 是 `todo-reminder` |
+| 44 | 打包版发通知 | 到点真的发出去，`firedFor` 落盘 | ✅ 13:40:29 到点、13:40:36 发出（那 7 秒是 tick 间隔）。闲置判定照旧生效 —— 13:28:02 那条因为没人动键盘鼠标一直不发，鼠标一动立刻补 |
+| 45 | 通知归属三件套 | `HKCU\Software\Classes\AppUserModelId\com.tomcato.todo-reminder` 下 `DisplayName` 中文、`CustomActivator` 指向 Electron 自注册的 GUID | ✅ `DisplayName 待办提醒`、`CustomActivator {3F8EBEE6-…}`（其 `LocalServer32` 正是这个 exe）。**这一条是修出来的**：`DisplayName` 原来走 `reg add` 参数，中文被控制台代码页吃掉；激活器原来把 CLSID 树捞回来自己比字符串，而 `reg.exe` 的 stdout 也是代码页编码，项目路径带中文时 11 个候选 0 命中 —— 也就是**这台机器上 CustomActivator 从来没被自动写上过一次**（开发态那条是当初做 spike 时手工写进去的，所以开发态一直看不出问题）。另外 Electron 要**第一次真走 toast 通道之后**才写下自己的 CLSID，所以 `show()` 之后补扫一次 |
+| 46 | 开机自启登记的是真 exe | `HKCU\...\Run` 里那条指向安装体本体，不是 `electron.exe` | ✅ 实测登记成 `com.tomcato.todo-reminder` = `"...\release\win-unpacked\todo-reminder.exe"`（开发态登记的是 `node_modules\...\electron.exe`，所以这条只有打包版算数）。验完已把这条 Run 项删回原样 |
+
+### 要你自己动手的（装完再看，一共 4 眼）
+
+`release\todo-reminder-0.1.0-setup.exe` 双击，默认 per-user 目录即可。**装之前先把开发态实例
+退出**（托盘那个「待办提醒」），否则两个实例抢全局快捷键，按 `Control+Alt+T` 弹的是先起来那个。
+
+1. 开始菜单搜「待办」—— 应该有一条名为**待办提醒**的快捷方式（NSIS 建的，Windows 就是靠它
+   把通知归属给这个 AUMID）。
+2. 到点弹一条通知 —— 右上角署名应该是**待办提醒**，不是 `electron.exe` 也不是 `todo-reminder`。
+3. 点通知正文 / 点「完成」—— 应该唤起**正在跑的那个**窗口，不是又冷启动一个进程
+   （第 45 项那个 `CustomActivator` 就是为这一步服务的）。
+4. 设置页勾上「登录 Windows 后自动运行」，重启或注销再回来 —— 托盘里应该它自己在。
+   顺带确认数据还在 `%APPDATA%\todo-reminder\todo-reminder.json`（NSIS 只删安装目录，不碰 userData）。
+
+不想要了就「设置 → 应用 → 待办提醒」卸载；卸载后 `HKCU\Software\Classes\AppUserModelId\`
+下那两条（`.dev` 与正式）属于残留，想清干净手工删掉即可 —— 应用本身只写 HKCU，不要管理员权限。
