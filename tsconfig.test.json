@@ -17,6 +17,7 @@
     "src/main/store.ts",
     "src/main/scheduler.ts",
     "src/main/notices.ts",
-    "scripts/core-test.ts"
+    "scripts/core-test.ts",
+    "scripts/make-icons.ts"
   ]
 }

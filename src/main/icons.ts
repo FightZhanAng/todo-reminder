@@ -1,4 +1,6 @@
-import { nativeImage, type NativeImage } from 'electron'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { app, nativeImage, type NativeImage } from 'electron'
 import { trayIconPng, type TrayIconKind } from '../shared/trayIcon'
 
 /**
@@ -27,4 +29,19 @@ export function trayIconPending(color: string): NativeImage {
 
 export function trayIconClear(color: string): NativeImage {
   return build('clear', color)
+}
+
+/**
+ * 窗口图标（任务栏 + Alt+Tab 用的那一枚）的文件路径，没有就返回 null。
+ *
+ * **只在开发态返回。** 打包后 Windows 直接从 exe 里取图标 —— 那是
+ * electron-builder 按 package.json 的 `build.win.icon` 嵌进去的，
+ * 比运行时再指一个文件可靠（也不会有「asar 里读不到」这类问题）。
+ *
+ * 图标本身由 `pnpm icons` 从 `shared/appIcon.ts` 生成，不手改二进制。
+ */
+export function windowIconPath(): string | null {
+  if (app.isPackaged) return null
+  const path = join(__dirname, '../../resources/icon.ico')
+  return existsSync(path) ? path : null
 }
