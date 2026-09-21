@@ -9,6 +9,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# 发 Release 要写权限；不给这一段的话 GITHUB_TOKEN 是只读的，最后一步会 403。
+permissions:
+  contents: write
+
 jobs:
   windows:
     runs-on: windows-latest
