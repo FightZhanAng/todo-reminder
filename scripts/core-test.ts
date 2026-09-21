@@ -42,6 +42,19 @@ import {
   trayIconBitmap,
   trayIconPng
 } from '../src/shared/trayIcon'
+import { APP_ICON_SIZES, appIconBitmap, buildAppIco } from '../src/shared/appIcon'
+import {
+  CAL_HEADERS,
+  CN_MONTHS,
+  dayKeyOf,
+  monthGrid,
+  monthLabel,
+  nextWeekdayAfter,
+  relativeDayLabel,
+  shiftMonth,
+  tsFromDayKey
+} from '../src/shared/calendar'
+import { collectDone, doneCount, doneDayLabel, recurringDoneLabel } from '../src/shared/done'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -737,9 +750,13 @@ console.log('\n--- 周期任务的「推迟」---')
 // 根因：icons.ts 把 SVG 塞进 data URL 交给 nativeImage，而 Electron **不支持 SVG** ——
 // 不报错，静默返回 0×0 的空图（实测 isEmpty() === true），托盘里什么都不显示，
 // 但 tooltip 与右键菜单正常，所以极难定位。
-// 修法：shared/trayIcon.ts 自己光栅化 + 自己编 PNG。下面直接断言像素。
+// 修法：shared/raster.ts 自己光栅化、shared/trayIcon.ts 自己编 PNG，下面直接断言像素。
+//
+// 2026-09-20 换了图形：从「方框里躺两条线」改成「一根竖轴 + 三道刻度」，
+// 和主看板同一个母题。**母题里最容易改坏的一条是「最长那一道越过轴」** ——
+// 它承的是「逾期」这个语义，所以专门为它留了两条断言（越轴的与不越轴的各一条）。
 // ---------------------------------------------------------------------------
-console.log('\n--- 托盘图标：必须是真有像素的 PNG ---')
+console.log('\n--- 托盘图标：必须是真有像素的 PNG，且刻度越过轴 ---')
 {
   const size = TRAY_ICON_SIZE * TRAY_ICON_SCALE
   const bmp = trayIconBitmap('pending', '#1B1F23')
@@ -748,6 +765,7 @@ console.log('\n--- 托盘图标：必须是真有像素的 PNG ---')
     for (let i = 3; i < b.length; i += 4) out.push(b[i])
     return out
   }
+  const alphaAt = (b: Buffer, x: number, y: number): number => b[(y * size + x) * 4 + 3]
 
   check('位图字节数 = w×h×4', bmp.length, size * size * 4)
   const a = alphasOf(bmp)
@@ -771,9 +789,22 @@ console.log('\n--- 托盘图标：必须是真有像素的 PNG ---')
     '1b1f23'
   )
 
-  check('两种形态的位图不同', trayIconBitmap('clear', '#1B1F23').equals(bmp), false)
-  const semi = alphasOf(trayIconBitmap('clear', '#1B1F23')).filter((v) => v > 70 && v < 130)
-  check('清空形态的半透明外框（0.45）确实存在', semi.length > 20, true)
+  // 设计坐标 → 像素：×2（TRAY_ICON_SCALE）。取每格的中心，避开小数边界
+  // 轴在 x=5.2、宽 1.5 → 像素 11 的横向区间 5.5..6.0 完整落在轴里
+  check('竖轴是实心的', alphaAt(bmp, 11, 8) > 200, true)
+  // 第三道刻度（y=11.4）从 x=3.6 起画，越过 x=5.2 的轴；像素 7 = 设计 3.5..4.0
+  check('最长的那道刻度越过轴、伸到轴左边', alphaAt(bmp, 7, 22) > 0, true)
+  // 对照：第二道（y=8.0）只在轴右边，同一个 x 上必须是空的
+  check('另外两道不越过轴', alphaAt(bmp, 7, 16), 0)
+  // 第二道刻度在轴右侧的实处：像素 14 = 设计 7.0..7.5
+  check('刻度画在轴的右边', alphaAt(bmp, 14, 16) > 200, true)
+
+  const clear = trayIconBitmap('clear', '#1B1F23')
+  check('两种形态的位图不同', clear.equals(bmp), false)
+  check('清空形态有实心像素（那个勾）', alphasOf(clear).filter((v) => v === 255).length > 20, true)
+  // alpha 0.45 → 约 115。数的是「明显不是全透明、也明显不满」的那一批
+  const dim = alphasOf(clear).filter((v) => v > 60 && v < 200).length
+  check('清空形态的轴淡下去（0.45）', dim > 20, true)
 
   const png = trayIconPng('pending', '#1B1F23')
   check('PNG 签名', png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
@@ -786,6 +817,82 @@ console.log('\n--- 托盘图标：必须是真有像素的 PNG ---')
 
   check('parseHexColor 三位简写', JSON.stringify(parseHexColor('#f0a')), JSON.stringify({ r: 255, g: 0, b: 170 }))
   check('parseHexColor 非法值退回黑', JSON.stringify(parseHexColor('nope')), JSON.stringify({ r: 0, g: 0, b: 0 }))
+}
+
+// ---------------------------------------------------------------------------
+// 应用图标。Windows 对 .ico 的格式相当挑剔，而错了不会有任何提示 —— 只会
+// 在任务栏上看到一枚默认的空白图标。所以把容器的每个字段都断言一遍。
+// ---------------------------------------------------------------------------
+console.log('\n--- 应用图标：.ico 的容器格式与配色 ---')
+{
+  const px = (b: Buffer, size: number, x: number, y: number): number[] => {
+    const o = (y * size + x) * 4
+    return [b[o], b[o + 1], b[o + 2], b[o + 3]]
+  }
+  const solid = appIconBitmap(64)
+  const hasColor = (rgb: number[]): boolean => {
+    for (let i = 0; i < solid.length; i += 4) {
+      if (solid[i] === rgb[0] && solid[i + 1] === rgb[1] && solid[i + 2] === rgb[2] && solid[i + 3] === 255) {
+        return true
+      }
+    }
+    return false
+  }
+
+  check('有纸面底板 #f4f6f5', hasColor([244, 246, 245]), true)
+  check('有靛蓝 #26496d', hasColor([38, 73, 109]), true)
+  check('有朱砂 #bf3628', hasColor([191, 54, 40]), true)
+  // 朱砂那一道必须**越过**靛蓝的轴。轴在 x=23、宽 5 → 20.5..25.5；
+  // 像素 17（设计坐标 17..18）整个落在轴的左边，只有越轴时才可能有颜色。
+  // 第三道刻度在 y=43.5：像素 43 完整落在它的 40.7..46.3 里。
+  check('朱砂那一笔越过了轴', px(solid, 64, 17, 43).slice(0, 3).join(','), '191,54,40')
+  // 对照：第二道刻度（y=32）不越轴，同一个 x 上必须是**纸面**。
+  // 这里只能比颜色不能比透明度 —— 应用图标底下有一块不透明的底板，
+  // alpha 处处都是 255（托盘图标是透明背景，才可以用 alpha 判空）。
+  check('另外两道不越轴（那里的纸面没被碰过）', px(solid, 64, 17, 32).slice(0, 3).join(','), '244,246,245')
+  check('轴上段仍是靛蓝', px(solid, 64, 22, 20).slice(0, 3).join(','), '38,73,109')
+  check('四角是透明的（圆角之外）', px(solid, 64, 0, 0)[3], 0)
+
+  check('尺寸表覆盖系统会用到的那些', APP_ICON_SIZES.join(','), '16,20,24,32,40,48,64,128,256')
+
+  const ico = buildAppIco()
+  const count = APP_ICON_SIZES.length
+  check('ICO 保留字段 = 0', ico.readUInt16LE(0), 0)
+  check('ICO 类型 = 1（图标，不是光标）', ico.readUInt16LE(2), 1)
+  check('ICO 条目数 = 尺寸数', ico.readUInt16LE(4), count)
+
+  const dirEntry = (i: number): number => 6 + i * 16
+  check('16 的宽高字节都写 16', `${ico[dirEntry(0)]},${ico[dirEntry(0) + 1]}`, '16,16')
+  check('256 的宽高字节写 0（ICO 的单字节约定）', `${ico[dirEntry(count - 1)]},${ico[dirEntry(count - 1) + 1]}`, '0,0')
+  check('目录里写 32 位', ico.readUInt16LE(dirEntry(0) + 6), 32)
+
+  // 图片数据紧挨着目录，每项的偏移 = 前一项偏移 + 前一项长度
+  let cursor = 6 + count * 16
+  let packed = true
+  const offsets: number[] = []
+  for (let i = 0; i < count; i++) {
+    const off = ico.readUInt32LE(dirEntry(i) + 12)
+    const len = ico.readUInt32LE(dirEntry(i) + 8)
+    offsets.push(off)
+    if (off !== cursor) packed = false
+    cursor += len
+  }
+  check('数据段无空洞、偏移首尾相接', packed, true)
+  check('最后一项刚好落在文件尾', cursor, ico.length)
+
+  // ≤64 用 BMP，≥128 用 PNG
+  const bmpOff = offsets[0]
+  check('16 是 BMP：biSize = 40', ico.readUInt32LE(bmpOff), 40)
+  check('BMP 宽 = 16', ico.readInt32LE(bmpOff + 4), 16)
+  check('BMP 高写成两倍（XOR + AND 叠在一个结构里）', ico.readInt32LE(bmpOff + 8), 32)
+  check('BMP 位深 = 32', ico.readUInt16LE(bmpOff + 14), 32)
+  check('BMP 不压缩', ico.readUInt32LE(bmpOff + 16), 0)
+  const bmpLen = ico.readUInt32LE(dirEntry(0) + 8)
+  check('BMP 长度 = 头 40 + 像素 + 全零 AND 掩码（4 字节对齐）', bmpLen, 40 + 16 * 16 * 4 + 4 * 16)
+
+  const off256 = offsets[count - 1]
+  check('256 是 PNG', ico.subarray(off256, off256 + 8).toString('hex'), '89504e470d0a1a0a')
+  check('256 的 PNG 边长写对', ico.readUInt32BE(off256 + 16), 256)
 }
 
 console.log('\n--- urgency.ts ---')
@@ -1143,6 +1250,36 @@ console.log('\n--- commands.ts ---')
   run({ type: 'task:complete', id: recurringId })
   check('昨天做过则 streak +1', (byId(recurringId) as RecurringTask).streak, 5)
 
+  // ---- task:uncomplete ----
+  // 取消完成只对截止型有意义；关键是**不动 firedFor** ——
+  // 点错勾不该被已经弹过的通知再追着打一次
+  const u1 = run({
+    type: 'task:create',
+    draft: { kind: 'deadline', title: '点错了', important: false, dueDay: at(2026, 9, 16), allDay: false, time: '09:00' }
+  })
+  const u1id = u1.touchedTaskId!
+  store.updateTask(u1id, { firedFor: at(2026, 9, 16, 8, 45) })
+  run({ type: 'task:complete', id: u1id })
+  check('uncomplete 前确实是已完成', (byId(u1id) as DeadlineTask).completedAt, now)
+  run({ type: 'task:uncomplete', id: u1id })
+  check('uncomplete 清 completedAt', (byId(u1id) as DeadlineTask).completedAt, null)
+  check('uncomplete 不动 firedFor', byId(u1id)!.firedFor, at(2026, 9, 16, 8, 45))
+  // 提醒点仍然等于 firedFor → dueNow 的幂等挡板照旧生效，不会再弹一次
+  check(
+    'uncomplete 后提醒点仍等于 firedFor（不会重弹）',
+    remindAtOf(byId(u1id) as DeadlineTask, S, now),
+    byId(u1id)!.firedFor
+  )
+
+  const again = run({ type: 'task:uncomplete', id: u1id })
+  check('本来就没完成的 uncomplete 失败', again.ok, false)
+  check('失败是业务性的，不该弹「数据写入失败」', again.writeError, undefined)
+  // 周期任务的完成态是 lastDoneDay + streak，没有历史可还原 —— 显式拒绝，
+  // 而不是做一个会把连续天数吃掉的动作
+  check('周期任务不能 uncomplete', run({ type: 'task:uncomplete', id: recurringId }).ok, false)
+  check('清单池不能 uncomplete', run({ type: 'task:uncomplete', id: freshSomeday }).ok, false)
+  check('不存在的 id 不能 uncomplete', run({ type: 'task:uncomplete', id: 'nope' }).ok, false)
+
   // ---- task:snooze ----
   const e1 = run({ type: 'task:create', draft: { kind: 'deadline', title: '推迟我', important: false, dueDay: at(2026, 9, 16, 18), allDay: false, time: '18:00' } })
   const e1id = e1.touchedTaskId!
@@ -1286,6 +1423,122 @@ console.log('\n--- notices.ts ---')
     })
     return c.head()!.action!.windowAction
   })(), 'open-data-dir')
+}
+
+// ---------------------------------------------------------------------------
+// 月历。日期控件里最容易差一格的就是「月初要补几格」，而补错了肉眼看不出
+// （整张日历会整体右移一天，看着也像一张日历）。所以按固定月份断言。
+//
+// 2026 年 9 月：1 日是周二，30 天 → 前补 1 格（8/31）、5 行、最后一行尾补 4 格。
+// ---------------------------------------------------------------------------
+console.log('\n--- calendar.ts：月历网格 ---')
+{
+  const sep = monthGrid(2026, 9)
+  check('9 月排成 5 行', sep.length, 5)
+  check('每行 7 格', sep.every((w) => w.length === 7), true)
+  check('周一起始：第一列的星期几是周一', sep[0][0].weekday, 1)
+
+  check('9/1 是周二 → 前面补 1 格', dayKey(sep[0][0].ts), '2026-08-31')
+  check('那格标记为邻月', sep[0][0].inMonth, false)
+  check('9 月 1 日落在第二列', dayKey(sep[0][1].ts), '2026-09-01')
+  check('9 月 1 日是本月的', sep[0][1].inMonth, true)
+  check('最后一天是 9 月 30 日', dayKey(sep[4][2].ts), '2026-09-30')
+  check('尾补的第一格是 10 月 1 日', dayKey(sep[4][3].ts), '2026-10-01')
+  check('尾补也标成邻月', sep[4][3].inMonth, false)
+  check('格子的 day 与时间戳一致', sep[4][2].day, 30)
+
+  const inMonthDays = sep.flat().filter((c) => c.inMonth).length
+  check('9 月有 30 天', inMonthDays, 30)
+
+  // 2 月：2026 平年 / 2024 闰年，且 2026-02-01 是周日 → 前补 6 格
+  check('2026-02-01 是周日 → 前补 6 格', dayKey(monthGrid(2026, 2)[0][6].ts), '2026-02-01')
+  check('平年 2 月 28 天', monthGrid(2026, 2).flat().filter((c) => c.inMonth).length, 28)
+  check('闰年 2 月 29 天', monthGrid(2024, 2).flat().filter((c) => c.inMonth).length, 29)
+
+  check('翻月跨年：12 月 +1 → 次年 1 月', JSON.stringify(shiftMonth({ year: 2026, month1: 12 }, 1)), '{"year":2027,"month1":1}')
+  check('翻月跨年：1 月 -1 → 上年 12 月', JSON.stringify(shiftMonth({ year: 2026, month1: 1 }, -1)), '{"year":2025,"month1":12}')
+  check('月份写汉字', monthLabel({ year: 2026, month1: 9 }), '2026 年 九月')
+  check('表头是周一起', CAL_HEADERS.join(''), '一二三四五六日')
+  check('月份表有 12 项', CN_MONTHS.length, 12)
+
+  check('tsFromDayKey 回到当天零点', tsFromDayKey('2026-09-18'), startOfDay(at(2026, 9, 18)))
+  check('tsFromDayKey 拒绝非日期串', tsFromDayKey('2026/09/18'), null)
+  check('tsFromDayKey 拒绝 2 月 31 日（不能悄悄滚到 3 月）', tsFromDayKey('2026-02-31'), null)
+  check('tsFromDayKey 拒绝 13 月', tsFromDayKey('2026-13-01'), null)
+  check('dayKeyOf 与 tsFromDayKey 同格式', dayKeyOf({ ts: at(2026, 9, 18), day: 18, inMonth: true, weekday: 5 }), '2026-09-18')
+
+  const now = at(2026, 9, 18, 10, 0)
+  check('相对日：今天', relativeDayLabel(at(2026, 9, 18, 23, 0), now), '今天')
+  check('相对日：明天', relativeDayLabel(at(2026, 9, 19), now), '明天')
+  check('相对日：后天', relativeDayLabel(at(2026, 9, 20), now), '后天')
+  check('相对日：昨天', relativeDayLabel(at(2026, 9, 17), now), '昨天')
+  check('相对日：前天', relativeDayLabel(at(2026, 9, 16), now), '前天')
+  check('相对日：3 天后', relativeDayLabel(at(2026, 9, 21), now), '3 天后')
+  check('相对日：一周内还算', relativeDayLabel(at(2026, 9, 25), now), '7 天后')
+  check('相对日：一周之外不给文案', relativeDayLabel(at(2026, 9, 26), now), null)
+
+  // 「下周一」必须是**严格之后**的那个周一：今天就是周一时得是 7 天后
+  check('周五的下周一 = 9/21', dayKey(nextWeekdayAfter(at(2026, 9, 18), 1)), '2026-09-21')
+  check('周一的下周一 = 下周的周一', dayKey(nextWeekdayAfter(at(2026, 9, 21), 1)), '2026-09-28')
+  check('周日 + 周一 = 明天', dayKey(nextWeekdayAfter(at(2026, 9, 20), 1)), '2026-09-21')
+}
+
+console.log('\n--- done.ts（已完成这本账）---')
+{
+  const now = at(2026, 9, 16, 16, 0) // 周三
+
+  const dLate = deadline({ id: 'd-late', dueAt: at(2026, 9, 10, 10, 0), completedAt: at(2026, 9, 16, 14, 20) })
+  const dEarly = deadline({ id: 'd-early', dueAt: at(2026, 9, 16, 9, 0), completedAt: at(2026, 9, 16, 9, 5) })
+  const dYest = deadline({ id: 'd-yest', dueAt: at(2026, 9, 15, 18, 0), completedAt: at(2026, 9, 15, 18, 30) })
+  const dOpen = deadline({ id: 'd-open' }) // 没完成
+  const dGone = deadline({ id: 'd-gone', completedAt: at(2026, 9, 16, 12, 0), deletedAt: now })
+  const rToday = recurring({ id: 'r-today', lastDoneDay: '2026-09-16', streak: 5 })
+  const rOld = recurring({ id: 'r-old', lastDoneDay: '2026-09-13', streak: 2 })
+  const rNever = recurring({ id: 'r-never' })
+  const s1 = someday({ id: 's-1' })
+
+  const all: Task[] = [dLate, dEarly, dYest, dOpen, dGone, rToday, rOld, rNever, s1]
+  const led = collectDone(all, now)
+
+  // 分组：按**完成日**分，不是按截止日 —— dLate 的 dueAt 是 9/10，但它落在 9/16 组
+  check('账本：分成两天', led.days.length, 2)
+  check('账本：最新的一天在最前', led.days[0].key, '2026-09-16')
+  check('账本：按完成日而非截止日入组', led.days[0].tasks.length, 2)
+  check('账本：同一天里最近做完的在最上面', led.days[0].tasks[0].id, 'd-late')
+  check('账本：同一天里次新的第二', led.days[0].tasks[1].id, 'd-early')
+  check('账本：第二天是昨天', led.days[1].key, '2026-09-15')
+
+  // 排除项：没完成的、软删的、清单池的都不进账
+  const ids = led.days.flatMap((d) => d.tasks.map((t) => t.id)).join(',')
+  check('账本：没完成的不进账', ids.includes('d-open'), false)
+  check('账本：软删的不进账', ids.includes('d-gone'), false)
+  check('账本：清单池不进任何一段', led.recurring.some((t) => t.id === 's-1'), false)
+
+  check('账本：一次性完成数', led.total, 3)
+  check('账本：周期打卡按最近完成日倒序', led.recurring.map((t) => t.id).join(','), 'r-today,r-old')
+  check('账本：从没打过卡的习惯不进账', led.recurring.some((t) => t.id === 'r-never'), false)
+  check('账本：总条数 = 一次性 + 周期', led.count, 5)
+
+  const empty = collectDone([], now)
+  check('账本：空账 days 为空', empty.days.length, 0)
+  check('账本：空账 count 为 0', empty.count, 0)
+
+  // 底栏计数必须和账本一致 —— 两处各写一份过滤迟早只有一份是对的
+  check('doneCount 与账本一致', doneCount(all), led.count)
+
+  // 标题：近三天用相对说法，一周以外换成日期 + 星期
+  check('账本标题：今天', doneDayLabel(at(2026, 9, 16), now), '今天')
+  check('账本标题：昨天', doneDayLabel(at(2026, 9, 15), now), '昨天')
+  check('账本标题：前天', doneDayLabel(at(2026, 9, 14), now), '前天')
+  check('账本标题：一周内仍是相对说法', doneDayLabel(at(2026, 9, 13), now), '3 天前')
+  check('账本标题：一周外换成日期加星期', doneDayLabel(at(2026, 9, 1), now), '9月1日 周二')
+
+  // 周期任务行尾：最近一次 + 连续天数
+  check('打卡文案：今天 + 连续', recurringDoneLabel(rToday, now), '今天已打卡 · 连续 5 天')
+  check('打卡文案：昨天不写连续 1 天', recurringDoneLabel(recurring({ lastDoneDay: '2026-09-15', streak: 1 }), now), '昨天打卡')
+  check('打卡文案：前天', recurringDoneLabel(recurring({ lastDoneDay: '2026-09-14', streak: 0 }), now), '前天打卡')
+  check('打卡文案：更早换日期', recurringDoneLabel(rOld, now), '上次 9月13日 · 连续 2 天')
+  check('打卡文案：连着一天不给「连续」', recurringDoneLabel(recurring({ lastDoneDay: '2026-09-16', streak: 1 }), now), '今天已打卡')
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
