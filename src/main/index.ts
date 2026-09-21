@@ -141,17 +141,15 @@ if (!app.requestSingleInstanceLock()) {
       store,
       isIdle: () =>
         powerMonitor.getSystemIdleTime() >= store.settings.idleThresholdMin * 60,
-      notify: (batch, desktop) => {
+      notify: (batch) => {
         // show() 前再扫一次 AUMID 激活器：Electron 何时写下自己的 CLSID 键
         // 没实测过，可能晚于启动时的 ensureAumidRegistered。扫不到就不写，
         // 留待下次 tick 重试（aumid.ts 里失败不缓存）；扫到则缓存、后续
         // 每 tick 都走廉价短路。这样窗口期内点击也不会冷启动裸 electron.exe。
         ensureAumidActivator(AUMID)
-        notifier.showBatch(batch, desktop)
+        notifier.showBatch(batch)
         tray.refresh()
-        // 回填 firedFor：非静默（desktop=true）路径不靠调度器自标，
-        // 必须由调用方在通知真正弹出去之后标，否则同批任务每 TICK_MS 重弹一次。
-        // 静默路径调度器已自标，这里再标一次幂等、无害。
+        // 回填 firedFor：通知真弹出去之后才标，否则同批任务每 TICK_MS 重弹一次
         scheduler.markFired([...batch.fresh, ...batch.missed])
         broadcast(ctx)
       }

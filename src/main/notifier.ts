@@ -34,9 +34,7 @@ export interface NotifierDeps {
 export class Notifier {
   constructor(private readonly deps: NotifierDeps) {}
 
-  /** desktop 为 false 表示只走手机推送，不弹桌面通知 */
-  showBatch(batch: NotifyBatch, desktop: boolean): void {
-    if (!desktop) return
+  showBatch(batch: NotifyBatch): void {
     if (!Notification.isSupported()) return
 
     for (const entry of batch.fresh) this.showTask(entry.task, entry.at)

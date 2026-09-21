@@ -109,7 +109,7 @@ export function buildTask(
       const task: DeadlineTask = {
         kind: 'deadline',
         id, title, important, createdAt, updatedAt: now,
-        deletedAt, firedFor: null, pushedFor: null,
+        deletedAt, firedFor: null,
         dueAt,
         allDay,
         leadMin: draft.leadMin ?? settings.defaultLeadMin,
@@ -122,7 +122,7 @@ export function buildTask(
       const task: RecurringTask = {
         kind: 'recurring',
         id, title, important, createdAt, updatedAt: now,
-        deletedAt, firedFor: null, pushedFor: null,
+        deletedAt, firedFor: null,
         rule: draft.rule,
         remindTime: draft.remindTime,
         lastDoneDay: null,
@@ -135,7 +135,7 @@ export function buildTask(
       const task: SomedayTask = {
         kind: 'someday',
         id, title, important, createdAt, updatedAt: now,
-        deletedAt, firedFor: null, pushedFor: null
+        deletedAt, firedFor: null
       }
       return note === undefined || note === '' ? task : { ...task, note }
     }
@@ -263,10 +263,10 @@ function route(store: CommandStore, cmd: Command, now: number): CommandResult {
     }
 
     case 'settings:patch': {
-      const patch: Partial<Settings> = { ...cmd.patch }
-      // push 是嵌套对象：不浅合并的话，只改 channel 会把整个 push 打回默认值
-      if (cmd.patch.push !== undefined) patch.push = { ...store.settings.push, ...cmd.patch.push }
-      store.patchSettings(patch)
+      // 只浅合并一层：嵌套对象（`quietHours`）必须由调用方给完整值。
+      // 渲染层确实是这么做的（`{ ...s.quietHours!, start: v }`），
+      // 在这里再深合并一次只会让人以为可以传半截对象。
+      store.patchSettings(cmd.patch)
       return { ok: true }
     }
   }

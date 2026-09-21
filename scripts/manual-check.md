@@ -16,7 +16,6 @@
   "updatedAt": <同左>,
   "deletedAt": null,
   "firedFor": null,
-  "pushedFor": null,
   "dueAt": <距今 1 分钟后的时间戳>,
   "allDay": false,
   "leadMin": 15,

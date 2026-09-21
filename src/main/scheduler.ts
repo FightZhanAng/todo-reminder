@@ -11,11 +11,8 @@ export interface NotifyBatch {
 
 export interface SchedulerDeps {
   store: Store
-  /**
-   * 把一批到点的任务交出去。
-   * `desktop` 为 false 表示「这批不该弹桌面通知，但仍要交给手机推送」。
-   */
-  notify: (batch: NotifyBatch, desktop: boolean) => void
+  /** 把一批到点的任务交出去（弹桌面通知） */
+  notify: (batch: NotifyBatch) => void
   /** 人是否不在电脑前 */
   isIdle: () => boolean
   now?: () => number
@@ -37,7 +34,7 @@ export class Scheduler {
   private timer: NodeJS.Timeout | null = null
   private pausedUntilValue: number | null = null
   private readonly store: Store
-  private readonly notify: (batch: NotifyBatch, desktop: boolean) => void
+  private readonly notify: (batch: NotifyBatch) => void
   private readonly isIdle: () => boolean
   private readonly clock: () => number
 
@@ -73,8 +70,8 @@ export class Scheduler {
 
   /**
    * 回填已处理的提醒点，保证 tick 幂等。
-   * 桌面通知由 notify 调用方在真正发出后回填 firedFor；
-   * 免打扰/空闲（silent）路径没有桌面回执，由 tick 自己调本方法标记。
+   * 由 notify 的调用方在桌面通知真正发出后调 —— 调度器自己不标，
+   * 因为「交出去」不等于「用户看见了」。
    */
   markFired(entries: DueEntry[]): void {
     for (const entry of entries) {
@@ -93,22 +90,16 @@ export class Scheduler {
     const settings = this.store.settings
     if (!settings.notifyEnabled) return
 
+    // 免打扰时段或人不在电脑前：这个 tick 什么都不做，**尤其不标 firedFor**。
+    // 标了就等于把这批提醒当场处理掉，它们再也进不了「错过补发」。
+    // 时段结束、人回来之后，同一个提醒点仍然 due，只是已经越过 MISS_GRACE_MS，
+    // 于是自然落进 missed，聚合成一条「有 N 件事错过了」而不是 N 条轰炸。
+    if (inQuietHours(settings, now) || (settings.quietWhenIdle && this.isIdle())) return
+
     const due = dueNow(this.remindableTasks(), settings, now)
     if (due.length === 0) return
 
-    const { fresh, missed } = groupMissed(due, now)
-
-    // 免打扰：不弹桌面通知，但批次照常交出去走手机推送。
-    // 待办不做「静默后重试」—— 「到点」这个事实不因为人不在而改变。
-    const silent =
-      inQuietHours(settings, now) || (settings.quietWhenIdle && this.isIdle())
-
-    this.notify({ fresh, missed }, !silent)
-
-    // 桌面通知有回执：notify 调用方在真正发出后回填 firedFor（见 markFired 注释），
-    // 因此这里不替它标。免打扰/空闲时批次只走手机推送、没有桌面回执，
-    // 调度器代为标记已处理，避免静默路径无限重发。
-    if (silent) this.markFired(due)
+    this.notify(groupMissed(due, now))
   }
 
   private remindableTasks() {

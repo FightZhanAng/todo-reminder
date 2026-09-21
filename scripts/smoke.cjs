@@ -84,32 +84,32 @@ const todayTasks = [
   {
     kind: 'deadline', id: 'overdue', title: '上周的报销', important: false,
     createdAt: now - 5 * 86_400_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     dueAt: now - 26 * HOUR, allDay: false, leadMin: 10, snoozeUntil: null, completedAt: null
   },
   {
     kind: 'deadline', id: 'upcoming', title: '下午的会', important: true,
     createdAt: now - 600_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     dueAt: now + 2 * HOUR, allDay: false, leadMin: 10, snoozeUntil: null, completedAt: null
   },
   {
     kind: 'deadline', id: 'anytime', title: '填报销单', important: false,
     createdAt: now - 300_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     dueAt: startOfToday,
     allDay: true, leadMin: 0, snoozeUntil: null, completedAt: null
   },
   {
     kind: 'recurring', id: 'recurring', title: '吃药', important: false,
     createdAt: now - 86_400_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     rule: { freq: 'daily', every: 1, skipWeekend: false }, remindTime: '09:00',
     lastDoneDay: null, streak: 3, snoozeUntil: null
   },
   {
     kind: 'someday', id: 'someday', title: '学 Rust', important: false,
-    createdAt: now - 120_000, updatedAt: now, deletedAt: null, firedFor: null, pushedFor: null
+    createdAt: now - 120_000, updatedAt: now, deletedAt: null, firedFor: null
   },
 
   // ---- 已完成这本账的素材 ----
@@ -118,42 +118,42 @@ const todayTasks = [
   {
     kind: 'deadline', id: 'done-a', title: '下午签的合同', important: false,
     createdAt: now - 4 * 86_400_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     dueAt: startOfToday - 86_400_000, allDay: false, leadMin: 10, snoozeUntil: null,
     completedAt: startOfToday + 14 * HOUR
   },
   {
     kind: 'deadline', id: 'done-b', title: '上午的电话', important: false,
     createdAt: now - 2 * 86_400_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     dueAt: startOfToday, allDay: true, leadMin: 0, snoozeUntil: null,
     completedAt: startOfToday + 9 * HOUR
   },
   {
     kind: 'deadline', id: 'done-c', title: '昨天的牙医', important: false,
     createdAt: now - 6 * 86_400_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     dueAt: startOfToday - 86_400_000, allDay: false, leadMin: 10, snoozeUntil: null,
     completedAt: startOfToday - 86_400_000 + 18 * HOUR
   },
   {
     kind: 'deadline', id: 'done-gone', title: '删掉的那条', important: false,
     createdAt: now - 86_400_000, updatedAt: now, deletedAt: now,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     dueAt: startOfToday, allDay: true, leadMin: 0, snoozeUntil: null,
     completedAt: startOfToday + 10 * HOUR
   },
   {
     kind: 'recurring', id: 'habit-today', title: '早上看简历', important: false,
     createdAt: now - 3 * 86_400_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     rule: { freq: 'daily', every: 1, skipWeekend: false }, remindTime: '08:30',
     lastDoneDay: dayKeyOf(startOfToday), streak: 5, snoozeUntil: null
   },
   {
     kind: 'recurring', id: 'habit-old', title: '每周复盘', important: false,
     createdAt: now - 20 * 86_400_000, updatedAt: now, deletedAt: null,
-    firedFor: null, pushedFor: null,
+    firedFor: null,
     // 规则**刻意不命中今天**：命中的话它也会出现在看板上，
     // 那份 fixture 的段计数就跟着变了 —— 这条素材只该影响已完成这本账
     rule: { freq: 'weekly', every: 1, days: [(new Date().getDay() + 2) % 7], skipWeekend: false },

@@ -22,8 +22,6 @@ export interface TaskBase {
   deletedAt: number | null
   /** 已为哪个提醒点弹过通知。存时间戳而不是布尔值 —— 见规格 §4.1 */
   firedFor: number | null
-  /** 已为哪个提醒点推过手机（第三期使用） */
-  pushedFor: number | null
 }
 
 export interface DeadlineTask extends TaskBase {
@@ -83,15 +81,6 @@ export type TaskPatch = Partial<
   Omit<DeadlineTask, 'kind'> & Omit<RecurringTask, 'kind'> & Omit<SomedayTask, 'kind'>
 >
 
-export interface PushConfig {
-  enabled: boolean
-  /** 密钥是否已配置；密钥本体在 secrets.bin（第三期） */
-  configured: boolean
-  channel: 'serverchan' | 'wecom'
-  when: 'awayOnly' | 'always'
-  awayIdleMin: number
-}
-
 export interface Settings {
   schemaVersion: number
   launchAtLogin: boolean
@@ -107,8 +96,7 @@ export interface Settings {
   quietHours: { start: string; end: string } | null
   quietWhenIdle: boolean
   idleThresholdMin: number
-  push: PushConfig
-  /** 第二期用 */
+  /** 全局快捷键（快速添加小窗） */
   hotkey: string
   theme: 'auto' | 'light' | 'dark'
 }

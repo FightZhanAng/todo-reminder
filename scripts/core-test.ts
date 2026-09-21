@@ -82,7 +82,6 @@ function deadline(patch: Partial<DeadlineTask> = {}): DeadlineTask {
     updatedAt: at(2026, 9, 16, 8, 0),
     deletedAt: null,
     firedFor: null,
-    pushedFor: null,
     dueAt: at(2026, 9, 16, 16, 30),
     allDay: false,
     leadMin: 15,
@@ -102,7 +101,6 @@ function recurring(patch: Partial<RecurringTask> = {}): RecurringTask {
     updatedAt: at(2026, 9, 14),
     deletedAt: null,
     firedFor: null,
-    pushedFor: null,
     rule: { freq: 'daily', every: 1, skipWeekend: false },
     remindTime: '09:00',
     lastDoneDay: null,
@@ -122,7 +120,6 @@ function someday(patch: Partial<SomedayTask> = {}): SomedayTask {
     updatedAt: at(2026, 9, 14),
     deletedAt: null,
     firedFor: null,
-    pushedFor: null,
     ...patch
   }
 }
@@ -483,17 +480,16 @@ console.log('\n--- scheduler.ts ---')
   // 1. 基本触发与幂等
   const store = tmpStore('todo-sched-', 'a.json')
   let clock = at(2026, 9, 16, 16, 14)
-  const batches: Array<{ fresh: string[]; missed: string[]; desktop: boolean }> = []
+  const batches: Array<{ fresh: string[]; missed: string[] }> = []
 
   const sched = new Scheduler({
     store,
     isIdle: () => false,
     now: () => clock,
-    notify: (batch, desktop) =>
+    notify: (batch) =>
       batches.push({
         fresh: batch.fresh.map((e) => e.task.id),
-        missed: batch.missed.map((e) => e.task.id),
-        desktop
+        missed: batch.missed.map((e) => e.task.id)
       })
   })
 
@@ -506,7 +502,6 @@ console.log('\n--- scheduler.ts ---')
   sched.tick()
   check('到点通知一次', batches.length, 1)
   check('归入 fresh', batches[0].fresh.join(','), 'k1')
-  check('desktop 为 true', batches[0].desktop, true)
 
   sched.tick()
   check('markFired 之前会重复通知', batches.length, 2)
@@ -531,38 +526,53 @@ console.log('\n--- scheduler.ts ---')
   check('8 点的提醒点归入 missed', b2[0].missed.join(','), 'm1')
   check('missed 不进 fresh', b2[0].fresh.length, 0)
 
-  // 3. 系统空闲 → 静默但仍交出批次
+  // 3. 人不在电脑前：不弹，也**不标已处理** —— 回来之后再补
   const store3 = tmpStore('todo-sched3-', 'c.json')
   store3.addTask(deadline({ id: 'i1' }))
-  const b3: Array<{ desktop: boolean; count: number }> = []
+  let idle = true
+  let clock3 = at(2026, 9, 16, 16, 15, 30)
+  const b3: Array<{ fresh: string[]; missed: string[] }> = []
   const sched3 = new Scheduler({
     store: store3,
-    isIdle: () => true,
-    now: () => at(2026, 9, 16, 16, 15, 30),
-    notify: (batch, desktop) => b3.push({ desktop, count: batch.fresh.length + batch.missed.length })
+    isIdle: () => idle,
+    now: () => clock3,
+    notify: (batch) =>
+      b3.push({ fresh: batch.fresh.map((e) => e.task.id), missed: batch.missed.map((e) => e.task.id) })
   })
   sched3.tick()
-  check('空闲时通知一次', b3.length, 1)
-  check('空闲时 desktop 为 false', b3[0].desktop, false)
-  check('空闲时批次仍带上了任务（给手机推送用）', b3[0].count, 1)
+  check('空闲时不弹通知', b3.length, 0)
   const idleTask = store3.tasks[0]
   if (idleTask.kind === 'someday') throw new Error('任务类型不对')
-  check('空闲时也标记了 firedFor', idleTask.firedFor, at(2026, 9, 16, 16, 15))
+  check('空闲时不标 firedFor（标了就再也补不回来）', idleTask.firedFor, null)
+  idle = false
+  clock3 = at(2026, 9, 16, 17, 30)
   sched3.tick()
-  check('空闲静默后不重复通知', b3.length, 1)
+  check('人回来后排一次', b3.length, 1)
+  check('回来时它已是「错过的」，走聚合而不是 fresh', b3[0].missed.join(','), 'i1')
+  check('聚合那条不在 fresh 里', b3[0].fresh.length, 0)
 
-  // 4. 免打扰时段
+  // 4. 免打扰时段：同上，出了时段再补
   const store4 = tmpStore('todo-sched4-', 'd.json')
   store4.patchSettings({ quietHours: { start: '22:00', end: '08:00' } })
-  store4.addTask(deadline({ id: 'n1', dueAt: at(2026, 9, 16, 23, 0) }))
-  const b4: Array<{ desktop: boolean }> = []
-  new Scheduler({
+  store4.addTask(deadline({ id: 'n1', dueAt: at(2026, 9, 16, 23, 0) }))   // 提醒点 22:45
+  let clock4 = at(2026, 9, 16, 22, 50)
+  const b4: Array<{ fresh: string[]; missed: string[] }> = []
+  const sched4 = new Scheduler({
     store: store4,
     isIdle: () => false,
-    now: () => at(2026, 9, 16, 22, 50),
-    notify: (_batch, desktop) => b4.push({ desktop })
-  }).tick()
-  check('免打扰时段 desktop 为 false', b4.length === 1 && b4[0].desktop === false, true)
+    now: () => clock4,
+    notify: (batch) =>
+      b4.push({ fresh: batch.fresh.map((e) => e.task.id), missed: batch.missed.map((e) => e.task.id) })
+  })
+  sched4.tick()
+  check('免打扰时段内不弹', b4.length, 0)
+  const quietTask = store4.tasks[0]
+  if (quietTask.kind === 'someday') throw new Error('任务类型不对')
+  check('免打扰时段内不标 firedFor', quietTask.firedFor, null)
+  clock4 = at(2026, 9, 17, 8, 30)
+  sched4.tick()
+  check('出了免打扰时段补发一次', b4.length, 1)
+  check('夜里攒下的走 missed 聚合', b4[0].missed.join(','), 'n1')
 
   // 5. 暂停 / 恢复
   const store5 = tmpStore('todo-sched5-', 'e.json')
@@ -622,11 +632,6 @@ console.log('\n--- 承重常量（静默改值 typecheck 抓不到）---')
   check('默认空闲免打扰开', DEFAULT_SETTINGS.quietWhenIdle, true)
   check('默认空闲阈值 5 分钟', DEFAULT_SETTINGS.idleThresholdMin, 5)
   check('默认主题 auto', DEFAULT_SETTINGS.theme, 'auto')
-  check('默认推送关闭', DEFAULT_SETTINGS.push.enabled, false)
-  check('默认推送未配置密钥', DEFAULT_SETTINGS.push.configured, false)
-  check('默认推送渠道 serverchan', DEFAULT_SETTINGS.push.channel, 'serverchan')
-  check('默认推送时机 awayOnly', DEFAULT_SETTINGS.push.when, 'awayOnly')
-  check('默认离开判定 5 分钟', DEFAULT_SETTINGS.push.awayIdleMin, 5)
   check('默认快捷键 Control+Alt+T', DEFAULT_SETTINGS.hotkey, 'Control+Alt+T')
 }
 
@@ -1073,7 +1078,6 @@ console.log('\n--- commands.ts ---')
   check('createdAt = now', last().createdAt, now)
   check('updatedAt = now', last().updatedAt, now)
   check('firedFor 为 null', last().firedFor, null)
-  check('pushedFor 为 null', last().pushedFor, null)
   check('deletedAt 为 null', last().deletedAt, null)
   check('deadline 的 completedAt 为 null', (last() as DeadlineTask).completedAt, null)
   check('deadline 的 snoozeUntil 为 null', (last() as DeadlineTask).snoozeUntil, null)
@@ -1346,11 +1350,10 @@ console.log('\n--- commands.ts ---')
   check('settings:patch 写进去', store.settings.snoozeMinutes, 20)
   check('settings:patch 写主题', store.settings.theme, 'dark')
   check('settings:patch 不动没提到的键', store.settings.idleThresholdMin, DEFAULT_SETTINGS.idleThresholdMin)
-  run({ type: 'settings:patch', patch: { push: { channel: 'wecom' } as never } })
-  check('push.channel 改了', store.settings.push.channel, 'wecom')
-  check('push.enabled 没被打回默认', store.settings.push.enabled, DEFAULT_SETTINGS.push.enabled)
-  check('push.when 没被打回默认', store.settings.push.when, DEFAULT_SETTINGS.push.when)
-  check('push.awayIdleMin 没被打回默认', store.settings.push.awayIdleMin, DEFAULT_SETTINGS.push.awayIdleMin)
+  run({ type: 'settings:patch', patch: { quietHours: { start: '23:00', end: '07:00' } } })
+  check('settings:patch 写嵌套对象', JSON.stringify(store.settings.quietHours),
+    JSON.stringify({ start: '23:00', end: '07:00' }))
+  check('写嵌套对象不牵连别的键', store.settings.snoozeMinutes, 20)
 
   // ---- 落盘 ----
   const persisted = JSON.parse(readFileSync(store.dataFile, 'utf-8')) as { tasks: Task[] }

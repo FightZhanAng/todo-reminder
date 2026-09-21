@@ -22,13 +22,6 @@ export const DEFAULT_SETTINGS: Settings = {
   quietHours: null,
   quietWhenIdle: true,
   idleThresholdMin: 5,
-  push: {
-    enabled: false,
-    configured: false,
-    channel: 'serverchan',
-    when: 'awayOnly',
-    awayIdleMin: 5
-  },
   hotkey: 'Control+Alt+T',
   theme: 'auto'
 }
