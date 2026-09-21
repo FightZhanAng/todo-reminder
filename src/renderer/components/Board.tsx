@@ -158,6 +158,19 @@ export function Board({ state }: { state: AppState }): JSX.Element {
           ))
         )}
       </div>
+      {/* 新建入口放在底栏上方正中：加东西是这个应用里最高频的动作，
+          顶栏那个角落留给设置 */}
+      <div className="addbar">
+        <button
+          type="button"
+          className="addbar__button"
+          aria-label="新建任务"
+          title="新建（N）"
+          onClick={() => state.go({ name: 'edit', id: null, kind: 'deadline' })}
+        >
+          + 记一件
+        </button>
+      </div>
       <BottomBar state={state} />
     </>
   )
@@ -209,12 +222,12 @@ function Head({
           </button>
           <button
             type="button"
-            className="iconbutton iconbutton--solid"
-            aria-label="新建任务"
-            title="新建（N）"
-            onClick={() => state.go({ name: 'edit', id: null, kind: 'deadline' })}
+            className="iconbutton"
+            aria-label="设置"
+            title="设置"
+            onClick={() => state.go({ name: 'settings' })}
           >
-            +
+            <GearGlyph />
           </button>
         </div>
       </div>
@@ -271,7 +284,33 @@ function MoonGlyph(): JSX.Element {
   )
 }
 
-/** 底栏：左侧三个账本入口（收件箱 / 以后 / 已完成），右侧提醒状态（规格 §6.1） */
+/** 顶栏那个入口现在指向设置，所以画的是齿轮而不是加号 */
+function GearGlyph(): JSX.Element {
+  return (
+    <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <g transform="translate(8 8)">
+        {Array.from({ length: 6 }, (_, i) => (
+          <rect
+            key={i}
+            x={-1.15}
+            y={-6.1}
+            width={2.3}
+            height={2.6}
+            rx={0.6}
+            fill="currentColor"
+            transform={`rotate(${i * 60})`}
+          />
+        ))}
+      </g>
+      <circle cx="8" cy="8" r="4.1" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="1.45" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
+/**
+ * 底栏：左侧三个账本入口（收件箱 / 以后 / 已完成），右侧提醒状态（规格 §6.1）
+ */
 function BottomBar({ state }: { state: AppState }): JSX.Element {
   const snapshot = state.snapshot!
   const inboxCount = snapshot.tasks.filter((t) => t.kind === 'someday' && t.deletedAt === null).length

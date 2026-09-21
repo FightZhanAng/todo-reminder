@@ -1349,6 +1349,36 @@ body,
   user-select: text;
 }
 
+/* ---- 新建入口（底栏上方正中） ---- */
+
+/* 它是全界面唯一的实心墨块（另一个在表单的提交钮上），所以别在这里
+   再放第二个带底色的东西。hover 变靛蓝 = 「这条快到了」那个语义不掺进来，
+   只是按钮的按压反馈。 */
+.addbar {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: 4px 12px 2px;
+}
+
+.addbar__button {
+  min-width: 132px;
+  padding: 7px 16px;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--sheet);
+  font-size: 13px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.addbar__button:hover {
+  background: var(--indigo);
+}
+
 /* ---- 底栏 ---- */
 
 .bottombar {
