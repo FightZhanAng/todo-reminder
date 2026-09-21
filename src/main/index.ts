@@ -1,10 +1,14 @@
 import { app, BrowserWindow, powerMonitor } from 'electron'
 import { join } from 'node:path'
 import { ensureAumidActivator, ensureAumidRegistered } from './aumid'
+import { windowIconPath } from './icons'
 import { broadcast, registerIpc, type AppContext } from './ipc'
 import type { Command, CommandResult } from '../shared/commands'
+import { isValidHotkey } from '../shared/hotkey'
+import { IPC, type OpenView } from '../shared/ipc'
 import { NoticeCenter } from './notices'
 import { Notifier } from './notifier'
+import { createQuickAdd, type QuickAdd } from './quickadd'
 import { Scheduler } from './scheduler'
 import { Store } from './store'
 import { applyTheme } from './theme'
@@ -46,18 +50,20 @@ let store: Store
 let scheduler: Scheduler
 let notifier: Notifier
 let tray: TrayController
+let quickAdd: QuickAdd
 
 let ctx: AppContext
 
 const notices = new NoticeCenter()
 
 function showMainWindow(): void {
-  // 第二期做真正的界面。现在只保证窗口能开，里面是占位 HTML。
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show()
     mainWindow.focus()
     return
   }
+
+  const icon = windowIconPath()
 
   mainWindow = new BrowserWindow({
     width: 420,
@@ -66,6 +72,8 @@ function showMainWindow(): void {
     minHeight: 480,
     show: false,
     autoHideMenuBar: true,
+    // 不给的话开发态任务栏上是 Electron 的默认原子图标；打包后走 exe 内嵌图标
+    ...(icon === null ? {} : { icon }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -78,6 +86,29 @@ function showMainWindow(): void {
   // 首帧由主进程主动推一次，渲染层不需要在挂载时先 get()
   mainWindow.webContents.on('did-finish-load', () => broadcast(ctx))
   mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
+/**
+ * 「把主窗口打开并告诉它该显示什么」。
+ *
+ * 单独抽出来是因为托盘菜单和系统通知都走这条路，而它们和 `showMainWindow`
+ * 有一处不同：**窗口可能是这一次才建出来的**，此刻渲染层还没挂载，直接 send
+ * 会石沉大海。所以首帧没好的时候挂到 did-finish-load 上补发。
+ * 那个事件上已经挂了 broadcast（在 showMainWindow 里注册的，先于这里），
+ * 所以补发时渲染层手里一定已经有快照了。
+ */
+function openMain(view: OpenView | null, focusTaskId: string | null): void {
+  showMainWindow()
+  const win = mainWindow
+  if (win === null || win.isDestroyed()) return
+
+  const send = (): void => {
+    if (win.isDestroyed()) return
+    if (view !== null) win.webContents.send(IPC.openView, view)
+    if (focusTaskId !== null) win.webContents.send(IPC.focusTask, { taskId: focusTaskId })
+  }
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send)
+  else send()
 }
 
 /** 单实例：第二次启动时唤起已有窗口，而不是再开一个托盘图标 */
@@ -126,19 +157,21 @@ if (!app.requestSingleInstanceLock()) {
       }
     })
 
+    quickAdd = createQuickAdd()
+
     notifier = new Notifier({
       store,
       scheduler,
-      // 第二期用 taskId 把窗口定位到具体那条任务；现在只把窗口唤起来
-      onFocusTask: () => showMainWindow()
+      // 点通知要落到**具体那一条**上：只把窗口唤起来，用户还得自己在列表里找
+      onFocusTask: (taskId) => openMain(null, taskId)
     })
 
     tray = new TrayController({
       store,
       scheduler,
       onOpen: () => showMainWindow(),
-      onQuickAdd: () => showMainWindow(),   // 第二期换独立小窗
-      onSettings: () => showMainWindow(),   // 第二期换成设置页
+      onQuickAdd: () => quickAdd.show(),
+      onSettings: () => openMain('settings', null),
       onQuit: () => {
         scheduler.stop()
         tray.destroy()
@@ -147,15 +180,14 @@ if (!app.requestSingleInstanceLock()) {
     })
     tray.create()
 
-    // 装配：AppContext 只用**此刻已有的部件**，后面每个任务增量补自己那块。
-    // 四个最小顶替（windows / hotkeyRegistered / setHotkey / quickAdd）都是
-    // 「诚实回答」而不是假成功，Task 12 换成真的。
+    // 装配：AppContext 用的都是此刻已经存在的部件。
+    // 快捷键这一组走 quickadd.ts —— 那里才知道「真注册上了没有」
     ctx = {
       store,
       scheduler,
       notices,
       windows: () => [mainWindow].filter((w): w is BrowserWindow => w !== null),
-      hotkeyRegistered: () => false,
+      hotkeyRegistered: () => quickAdd.isHotkeyRegistered(),
       afterCommand: (cmd: Command, _result: CommandResult) => {
         // 原规格 §6.4：完成/推迟/推到明天/新建/编辑/删除/设置变更
         // 都要立刻重算一次并刷新托盘
@@ -173,11 +205,21 @@ if (!app.requestSingleInstanceLock()) {
         // 因为那条路要求先试注册、成功才写设置
       },
       afterPauseChange: () => tray.refresh(),
-      setHotkey: () => false,
-      quickAdd: { hide: () => undefined }
+      setHotkey: (hotkey) => quickAdd.setHotkey(hotkey),
+      quickAdd: { hide: () => quickAdd.hide() }
     }
 
     registerIpc(ctx)
+
+    // 带 `--open` 启动时直接把主窗口打开。
+    // 平时这是个纯托盘应用，启动完屏幕上什么都不出现 —— 但要"看一眼界面"的时候，
+    // 不该先让人去右下角找托盘图标。用法：electron . --open
+    if (process.argv.includes('--open')) showMainWindow()
+
+    // 启动时把存着的快捷键注册上。注册失败**不报错也不清设置** ——
+    // 多半是那个组合被别的程序抢了，界面会据 hotkeyRegistered 显示出来，
+    // 用户改一个就好；这里清掉反而让他不知道原来设的是什么
+    if (isValidHotkey(store.settings.hotkey)) quickAdd.setHotkey(store.settings.hotkey)
 
     scheduler.start()
 
@@ -185,5 +227,9 @@ if (!app.requestSingleInstanceLock()) {
     app.on('window-all-closed', () => undefined)
   })
 
-  app.on('before-quit', () => scheduler?.stop())
+  app.on('before-quit', () => {
+    scheduler?.stop()
+    // 热键要解绑：不解绑的话进程虽然退了，组合键在系统里还是被占着
+    quickAdd?.destroy()
+  })
 }

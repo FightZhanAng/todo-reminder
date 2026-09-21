@@ -16,6 +16,8 @@ export const IPC = {
   snapshot: 'todo:snapshot',
   /** main → renderer：把某条任务滚进视野并高亮 */
   focusTask: 'todo:focus-task',
+  /** main → renderer：切到某个视图（托盘菜单用） */
+  openView: 'todo:open-view',
   /** renderer → main：窗口与进程级动作 */
   window: 'todo:window',
   /** 快速添加窗 → main：提交一条草稿后关窗 */
@@ -30,6 +32,12 @@ export const IPC = {
 
 /** 窗口 / 进程级动作。不改数据，所以不走命令层 */
 export type WindowAction = 'hide' | 'open-data-dir' | 'quit'
+
+/**
+ * 托盘菜单能让主窗口切到哪儿。只有这三个 —— 编辑器要带参数（编辑哪条），
+ * 不是「切个视图」能表达的，所以不在其中。
+ */
+export type OpenView = 'board' | 'inbox' | 'settings'
 
 /** preload 用它区分自己是哪个窗口的桥 */
 export const WINDOW_ARG_PREFIX = '--todo-window='
@@ -67,6 +75,8 @@ export interface TodoApi {
   /** 返回取消订阅的函数 */
   onSnapshot(cb: (snapshot: Snapshot) => void): () => void
   onFocusTask(cb: (taskId: string) => void): () => void
+  /** 托盘菜单要求切视图 */
+  onOpenView(cb: (view: OpenView) => void): () => void
   /** 返回的不是 `Snapshot`，只是一个结果 —— 显示值由广播更新，错误由这个结果当场反馈 */
   setHotkey(hotkey: string): Promise<{ ok: boolean }>
   window(action: WindowAction): Promise<void>

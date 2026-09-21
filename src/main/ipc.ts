@@ -9,7 +9,12 @@ export interface AppContext {
   store: Store
   scheduler: Scheduler
   notices: NoticeCenter
-  /** 广播目标：主窗口与快速添加窗都要收到 */
+  /**
+   * 广播目标。
+   *
+   * 只有订阅了 `onSnapshot` 的窗口才该在这里 —— 快速添加窗的桥没有订阅口
+   * （它记完就关，不需要知道别的任务长什么样），给它发只是白开销。
+   */
   windows: () => BrowserWindow[]
   /** 快捷键是否注册成功（由 quickadd.ts 维护） */
   hotkeyRegistered: () => boolean

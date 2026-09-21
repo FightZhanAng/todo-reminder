@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, WINDOW_ARG_PREFIX, type NoticeId, type WindowKind } from '../shared/ipc'
+import { IPC, WINDOW_ARG_PREFIX, type NoticeId, type OpenView, type WindowKind } from '../shared/ipc'
 import type { Command, TaskDraft } from '../shared/commands'
 import type { Snapshot } from '../shared/ipc'
 
@@ -40,6 +40,11 @@ if (kind === 'quickadd') {
       const listener = (_e: unknown, payload: { taskId: string }): void => cb(payload.taskId)
       ipcRenderer.on(IPC.focusTask, listener)
       return () => ipcRenderer.removeListener(IPC.focusTask, listener)
+    },
+    onOpenView: (cb: (view: OpenView) => void): (() => void) => {
+      const listener = (_e: unknown, view: OpenView): void => cb(view)
+      ipcRenderer.on(IPC.openView, listener)
+      return () => ipcRenderer.removeListener(IPC.openView, listener)
     },
     setHotkey: (hotkey: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke(IPC.setHotkey, hotkey),

@@ -41,7 +41,14 @@ export default defineConfig({
     server: { fs: { allow: [resolve(__dirname)] } },
     plugins: [react()],
     build: {
-      rollupOptions: { input: { index: resolve(__dirname, 'src/renderer/index.html') } }
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          // 快速添加小窗是第二个渲染入口：一个 440×148 的无边框窗口，
+          // 装不下主界面的东西，也不该为它把主 bundle 拉进来
+          quickadd: resolve(__dirname, 'src/renderer/quickadd.html')
+        }
+      }
     }
   }
 })
