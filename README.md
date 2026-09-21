@@ -18,6 +18,8 @@ Windows 托盘常驻的待办应用。三句话说明它跟别的待办软件有
 - **快速添加**：`Ctrl+Alt+T` 呼出小窗，记完即关
 - 深浅主题跟随系统，也可以钉死
 
+> 仓库是 TypeScript + React，**没有网页版**，上面这些都是桌面窗口。
+
 ## 技术栈
 
 Electron 43 + electron-vite 5 + React 19 + TypeScript，包管理 pnpm。
@@ -58,6 +60,12 @@ Electron 会以 node 模式启动、`app.ready` 之前静默退出。结果落�
 另外：图标是代码画出来的（`src/shared/raster.ts` 自己光栅化、自己编 ICO），改完跑 `pnpm icons`。
 **别把 SVG 喂给 `nativeImage`** —— 它不报错，静默返回一张 0×0 空图，托盘里就什么都不剩了。
 
+## 下载
+
+Releases 里有打包好的安装版：`todo-reminder-<版本>-setup.exe`（NSIS，per-user 安装）
+与 `todo-reminder-<版本>-portable.exe`（便携版，双击即用，但开机自启别指望它 ——
+它跑在临时解压目录里）。
+
 ## 许可
 
-暂未指定开源许可，默认保留所有权利。
+MIT，见 [LICENSE](LICENSE)。
