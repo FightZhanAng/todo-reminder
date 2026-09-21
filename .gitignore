@@ -2,5 +2,14 @@ node_modules/
 out/
 release/
 .tmp-test/
+.tmp-smoke/
+.tmp-icons/
 .spike/
 *.log
+
+# superpowers 工作流产出的文档（本项目不使用，见 AGENTS.md）
+docs/superpowers/
+.superpowers/
+
+# electron-vite 生成的临时配置
+electron.vite.config.*.mjs
