@@ -9,6 +9,7 @@ import type { Task } from '@shared/types'
 export type View =
   | { name: 'board' }
   | { name: 'inbox' }
+  | { name: 'done' }
   | { name: 'settings' }
   | { name: 'edit'; id: string | null; kind: TaskKind }
 
@@ -28,6 +29,8 @@ export interface AppState {
   run: (cmd: Command) => Promise<void>
   /** 完成：登记 done 退场后再发命令 */
   complete: (task: Task) => void
+  /** 取消完成（已完成清单里点勾）。同样先登记退场，让行淡出而不是当场消失 */
+  uncomplete: (task: Task) => void
   /** 删除：登记 removed 退场后再发命令 */
   remove: (task: Task) => void
   /** 撤销删除 */
@@ -57,6 +60,18 @@ export function useAppState(): AppState {
       window.todo.onFocusTask((taskId) => {
         setView((v) => (v.name === 'inbox' ? v : { name: 'board' }))
         setFocusTaskId(taskId)
+      }),
+    []
+  )
+
+  // 托盘菜单切视图。与上面那条的区别：通知点击是「去看某条任务」，
+  // 这条是用户在主窗口外面明确点了「设置」或「收件箱」
+  useEffect(
+    () =>
+      window.todo.onOpenView((view) => {
+        setView(
+          view === 'settings' ? { name: 'settings' } : view === 'inbox' ? { name: 'inbox' } : { name: 'board' }
+        )
       }),
     []
   )
@@ -128,6 +143,21 @@ export function useAppState(): AppState {
     [pushExit, run]
   )
 
+  // 取消完成也走 'done' 退场：这一行同样要「淡出并被移出」，而不是当场消失。
+  // 借的是同一段 520ms 动画的**时长与观感**，语义上它是「离开这本账」——
+  // 看板上的完成是离开看板，这里是离开账本，两边都是「这一行要走」。
+  //
+  // 这里比 complete 多一句 flash：行淡出之后用户会问「它去哪儿了」，
+  // 而「它现在回看板了」是这本账唯一需要额外解释的一件事
+  const uncomplete = useCallback(
+    (task: Task) => {
+      pushExit(task, 'done')
+      setFlash('已收回今天')
+      void run({ type: 'task:uncomplete', id: task.id })
+    },
+    [pushExit, run]
+  )
+
   const remove = useCallback(
     (task: Task) => {
       pushExit(task, 'removed')
@@ -159,6 +189,7 @@ export function useAppState(): AppState {
     go: setView,
     run,
     complete,
+    uncomplete,
     remove,
     undoRemove,
     settle,
