@@ -33,6 +33,7 @@
   | `pnpm test:core` | 核心逻辑 507 项（时间/周期/提醒/命令层/store/调度器/**月历**/**图标像素与 ico 容器**/**已完成账本**/**以后这本账**） | ~4s |
   | `pnpm smoke` | 界面 116 项：看板/收件箱/**已完成账本**/**以后**/编辑器/设置页/快速添加窗/日历浮层/时间浮层/**深浅主题**真开起来点一遍 | ~11s |
   | `pnpm icons` | 从代码重画 `resources/icon.ico`（加 `--preview` 另存各尺寸 PNG 用来看） | ~6s |
+  | `pnpm dist` | 出安装包：`release/todo-reminder-<版本>-setup.exe`（NSIS）+ 同版本便携版 | ~2min |
 
   `pnpm smoke` 必须在 **PowerShell** 里跑，且先 `Remove-Item Env:ELECTRON_RUN_AS_NODE`；
   结果落在 `.tmp-smoke/report.json`（electron.exe 是 GUI 子系统程序，stdout 接不到控制台）。
@@ -94,6 +95,36 @@
 - `scripts/core-test.ts` — 核心逻辑测试（唯一需要保留的测试入口）
 - `scripts/smoke.cjs` — 界面冒烟（真开 Electron 点一遍）
 - `scripts/make-icons.ts` — 重画应用图标
+
+## 打包（第三期落地，2026-09-21）
+
+一条命令：`pnpm dist`（= `electron-vite build` + `node scripts/dist.mjs --win --publish never`），
+产物在 `release/`（已 gitignore）。几条硬规矩：
+
+1. **配置只在 `electron-builder.yml` 一处。** 别再往 `package.json` 的 `build` 块里加东西 ——
+   两处配置迟早不一致，而 `productName` 和 AUMID 的 `DisplayName` 必须与界面上的显示名同步。
+2. **不要直接跑 `electron-builder`，跑 `scripts/dist.mjs`。** 这台机器访问 GitHub 会卡在
+   证书吊销检查（`CRYPT_E_NO_REVOCATION_CHECK`），winCodeSign / nsis 那些二进制必须走
+   npmmirror 镜像，那个脚本就是干这个的（顺带避开 `.cmd` 在中文路径下被截断的坑）。
+3. **exe 名保持 ASCII**（`executableName: todo-reminder`），中文交给 `productName` 和快捷方式名。
+4. **图标喂自己产的 32×32 多尺寸 `.ico`**，别给 png 让 electron-builder 去转 ——
+   它内置的 WASM 图标工具在内存受限环境下直接把打包流程崩掉。
+5. **通知归属是三件事，少一件都不弹**（实测，见 `src/main/aumid.ts` 顶部）：
+   `app.setAppUserModelId()`、NSIS 建的开始菜单快捷方式、`HKCU\Software\Classes\AppUserModelId\<AUMID>`
+   下的 `DisplayName` / `HasSentNotification` / `CustomActivator`。两个雷：
+   - `DisplayName` 要写中文 → **只能走 UTF-16LE + BOM 的 `.reg` 文件 + `reg import`**。
+     走 `reg add` 的命令行参数会被控制台代码页吃掉，注册表里落成乱码。
+   - 找 Electron 自注册的激活器 GUID → **只能拿 exe 路径去问 `reg`**
+     （`reg query ...\CLSID /s /f <execPath> /d`），不能把整棵树捞回来自己比字符串：
+     `reg.exe` 的 stdout 是控制台代码页，中文路径按 utf8 解出来是乱码，
+     `line.includes(process.execPath)` 在本机（项目在「我的工作台」下）永远不成立 —— 
+     实测 11 个候选 0 命中，等于这个功能从来没自动写上过。输出里只取键名，GUID 本身是纯 ASCII。
+   - Electron **第一次真正走 toast 通道之后**才写下自己的 CLSID，所以 `show()` 之后要再扫一次，
+     否则装完之后的头几条通知点不动。
+6. **开机自启只有打包版算真验过。** 开发态 `process.execPath` 是 `electron.exe`，
+   注册进 `HKCU\...\Run` 的是它（2026-09-21 实测：打包版登记的是
+   `"...\release\win-unpacked\todo-reminder.exe"`，键名用 AUMID）。
+   便携版（portable）自启不可信 —— 它跑在临时解压目录里。
 
 ## 文件卫生
 
