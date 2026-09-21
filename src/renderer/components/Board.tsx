@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type JSX } from 'react'
+import { CN_MONTHS } from '@shared/calendar'
+import { doneCount } from '@shared/done'
 import { WEEKDAYS, formatClock } from '@shared/time'
 import { groupToday, type TodayGroups } from '@shared/group'
 import type { Task } from '@shared/types'
 import { SectionList, type SectionName } from './SectionList'
 import type { AppState } from '../useAppState'
+import { useDarkMode } from '../useDarkMode'
 
 interface FlatRow {
   id: string
@@ -20,6 +23,8 @@ const SECTIONS: { section: keyof TodayGroups; label: string }[] = [
   { section: 'anytime', label: '今天随时' },
   { section: 'recurring', label: '每天' }
 ]
+
+/** 月份写成汉字（CN_MONTHS）在 shared/calendar.ts —— 日历控件也用同一份 */
 
 export function Board({ state }: { state: AppState }): JSX.Element {
   const { tasks, now, snapshot, focusTaskId } = state
@@ -130,7 +135,7 @@ export function Board({ state }: { state: AppState }): JSX.Element {
 
   return (
     <>
-      <TopBar state={state} />
+      <Head state={state} remaining={total} overdue={groups.overdue.length} />
       <div className="app__body">
         {total === 0 ? (
           <div className="empty">
@@ -157,32 +162,119 @@ export function Board({ state }: { state: AppState }): JSX.Element {
   )
 }
 
-/** 顶栏：左侧「今天 · 9月18日 周五」，右侧新建 */
-function TopBar({ state }: { state: AppState }): JSX.Element {
+/**
+ * 顶栏。整张界面唯一的主角是**今天这个日子**，所以它拿到最大的字号：
+ * 「九月」是一枚宽字距的小标签，「18」是 30px 的宋体，周五缀在基线右侧。
+ *
+ * 第二行是一条账目式的状态：现在几点 · 还剩几件 · 逾期几件。
+ * 「还剩 0 件」这一档不出现 —— 那句话说在空状态的大字里更合适。
+ */
+function Head({
+  state,
+  remaining,
+  overdue
+}: {
+  state: AppState
+  remaining: number
+  overdue: number
+}): JSX.Element {
+  const d = new Date(state.now)
+  const dark = useDarkMode()
+
   return (
-    <header className="topbar">
-      <h1 className="topbar__title">
-        今天
-        <span className="topbar__date">{formatHeaderDate(state.now)}</span>
-      </h1>
-      <div className="topbar__actions">
-        <button
-          type="button"
-          className="iconbutton"
-          aria-label="新建任务"
-          onClick={() => state.go({ name: 'edit', id: null, kind: 'deadline' })}
-        >
-          +
-        </button>
+    <header className="head">
+      <div className="head__main">
+        <h1 className="dateline">
+          <span className="dateline__month">{CN_MONTHS[d.getMonth()]}</span>
+          <span className="dateline__day">{d.getDate()}</span>
+          <span className="dateline__dow">{WEEKDAYS[d.getDay()]}</span>
+        </h1>
+        <div className="head__actions">
+          {/* 图标画的是「点下去会变成什么」，不是「现在是什么」——
+              和系统里那一排开关一致，不用先想一下再点 */}
+          <button
+            type="button"
+            className="iconbutton"
+            aria-label={dark ? '切到浅色' : '切到深色'}
+            title={dark ? '切到浅色' : '切到深色'}
+            onClick={() =>
+              void state.run({
+                type: 'settings:patch',
+                patch: { theme: dark ? 'light' : 'dark' }
+              })
+            }
+          >
+            {dark ? <SunGlyph /> : <MoonGlyph />}
+          </button>
+          <button
+            type="button"
+            className="iconbutton iconbutton--solid"
+            aria-label="新建任务"
+            title="新建（N）"
+            onClick={() => state.go({ name: 'edit', id: null, kind: 'deadline' })}
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      <div className="head__status">
+        <span className="head__clock">{formatClock(state.now)}</span>
+        {remaining > 0 && (
+          <>
+            <span className="head__sep">·</span>
+            <span>还剩 {remaining} 件</span>
+          </>
+        )}
+        {overdue > 0 && <span className="head__late">逾期 {overdue}</span>}
       </div>
     </header>
   )
 }
 
-/** 底栏：左侧收件箱入口，右侧提醒状态（规格 §6.1） */
+/* 两个图标自绘。用 currentColor 描边，所以 hover 变色、深浅主题都自动跟上 */
+
+function SunGlyph(): JSX.Element {
+  return (
+    <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <circle cx="8" cy="8" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <g stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+        <line x1="8" y1="0.9" x2="8" y2="2.9" />
+        <line x1="8" y1="13.1" x2="8" y2="15.1" />
+        <line x1="0.9" y1="8" x2="2.9" y2="8" />
+        <line x1="13.1" y1="8" x2="15.1" y2="8" />
+        <line x1="2.98" y1="2.98" x2="4.4" y2="4.4" />
+        <line x1="11.6" y1="11.6" x2="13.02" y2="13.02" />
+        <line x1="13.02" y1="2.98" x2="11.6" y2="4.4" />
+        <line x1="4.4" y1="11.6" x2="2.98" y2="13.02" />
+      </g>
+    </svg>
+  )
+}
+
+function MoonGlyph(): JSX.Element {
+  return (
+    <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      {/* 24 格上的标准月牙，缩到 16 格用：1.4 的线宽 = 2.1 × 0.6667 */}
+      <g transform="scale(0.6667)">
+        <path
+          d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.1"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </g>
+    </svg>
+  )
+}
+
+/** 底栏：左侧两个账本入口（今天 / 已完成 / 收件箱），右侧提醒状态（规格 §6.1） */
 function BottomBar({ state }: { state: AppState }): JSX.Element {
   const snapshot = state.snapshot!
   const inboxCount = snapshot.tasks.filter((t) => t.kind === 'someday' && t.deletedAt === null).length
+  const doneTotal = doneCount(snapshot.tasks)
   const paused = snapshot.runtime.pausedUntil
 
   // 关了通知优先说「已关闭」—— 关了就不会响，比暂停更值得说
@@ -190,9 +282,16 @@ function BottomBar({ state }: { state: AppState }): JSX.Element {
 
   return (
     <footer className="bottombar">
-      <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'inbox' })}>
-        收件箱 · {inboxCount} 件
-      </button>
+      {/* 两个入口都常驻显示，计数为 0 也不藏 —— 一个会消失的导航入口
+          比一个「已完成 · 0 件」更难找 */}
+      <div className="bottombar__links">
+        <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'inbox' })}>
+          收件箱 · {inboxCount} 件
+        </button>
+        <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'done' })}>
+          已完成 · {doneTotal} 件
+        </button>
+      </div>
       {notifyOff ? (
         <button
           type="button"
@@ -214,12 +313,7 @@ function BottomBar({ state }: { state: AppState }): JSX.Element {
   )
 }
 
-// WEEKDAYS 来自 shared/time.ts（上面刚新增），本文件不再自定义一份
-
-function formatHeaderDate(ts: number): string {
-  const d = new Date(ts)
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAYS[d.getDay()]}`
-}
+// WEEKDAYS 来自 shared/time.ts，本文件不再自定义一份
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false

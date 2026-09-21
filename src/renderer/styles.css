@@ -1,3 +1,20 @@
+/*
+ * 今日账本 —— 视觉说明
+ *
+ * 这件工具的内容是「今天还剩什么，哪件已经晚了」。所以整张界面围绕两根线组织：
+ *
+ *   1. 一根**竖轴**从列表顶部通到底部，每行在轴上留一道刻度。
+ *      刻度的长度编码紧迫度：7px 细灰线（不急）/ 13px 靛蓝加粗（一小时内）/
+ *      21px 朱砂、并且**越过轴向左伸出去**（逾期 —— 像一根冲过限位刻度的针）。
+ *      这不是装饰：竖向扫一眼就知道今天有几件事已经越线了。
+ *
+ *   2. 顶部一行**大号宋体的日期**（九月 18 周五），旁边一枚实心方钮。
+ *      日期是这个应用唯一的主角，所以它拿到最大的字号。
+ *
+ * 其余一切（分段标签、表单、按钮）刻意保持安静：细发丝线、小圆角、无阴影，
+ * 只有两个填充块（顶栏的「+」和表单的提交钮）配得上实心墨色。
+ */
+
 *,
 *::before,
 *::after {
@@ -12,8 +29,7 @@ body,
 }
 
 body {
-  /* 系统字体，零字体文件、零加载、离线必然可用（规格 §9.4） */
-  font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 13px;
   line-height: 1.5;
   color: var(--ink);
@@ -24,13 +40,16 @@ body {
   overflow: hidden;
 }
 
-/* 时刻与数字：等宽，可以竖着扫读一天的节奏（规格 §9.4） */
+/* 时刻与数字：等宽，可以竖着扫读一天的节奏 */
 .mono {
-  font-family: 'Cascadia Mono', Consolas, ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-input,
+/* ---- 基础控件 ---- */
+
+/* 勾选框不走这套壳子，否则 padding/border 会糊成一团 */
+input:not([type='checkbox']):not([type='radio']),
 textarea {
   font: inherit;
   color: inherit;
@@ -38,18 +57,25 @@ textarea {
   user-select: text;
   background: var(--surface);
   border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 5px 7px;
+  border-radius: var(--radius);
+  padding: 5px 8px;
   width: 100%;
+  transition: border-color 120ms ease;
 }
 
-/* 不做 outline: none —— 焦点环是键盘可用的前提（规格 §9.9） */
+input:not([type='checkbox']):not([type='radio']):hover,
+textarea:hover {
+  border-color: var(--rule-strong);
+}
+
+/* 不做 outline: none —— 焦点环是键盘可用的前提。
+   焦点只用一个环表达，不再同时改 border-color，免得变成两个套在一起的圈 */
 input:focus-visible,
 textarea:focus-visible,
 button:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
+  outline: 2px solid var(--indigo);
+  outline-offset: 1px;
 }
 
 button {
@@ -77,20 +103,158 @@ ul {
   }
 }
 
-/* ---- 应用外壳：顶栏 / 看板 / 底栏 三段（规格 §6.1） ---- */
+/* ---- 外壳：三段（顶栏 / 列表纸面 / 底栏） ---- */
 
 .app {
   display: flex;
   flex-direction: column;
   height: 100%;
+  background: var(--paper);
 }
 
-.app__body {
+.app__body,
+.page__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  /* 列表是「铺在台面上的一张纸」，比窗口底色亮一档 */
+  background: var(--sheet);
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
 }
+
+/* ---- 顶栏：大号日期 + 一枚实心方钮 ---- */
+
+.head {
+  flex: none;
+  padding: 11px 12px 9px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.head__main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* 顶栏右侧那一组：主题开关 + 新建。两个按钮之间留 4px —— 它们不是一组
+   功能，但挨着才像一条工具条 */
+.head__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 自绘图标：currentColor 描边，所以 hover 与深浅主题都自动跟上 */
+.glyph {
+  display: block;
+}
+
+.dateline {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+  min-width: 0;
+}
+
+.dateline__month {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--ink-muted);
+}
+
+.dateline__day {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.dateline__dow {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.head__status {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+.head__clock {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  letter-spacing: -0.02em;
+  color: var(--ink-muted);
+}
+
+.head__sep {
+  color: var(--ink-faint);
+}
+
+.head__late {
+  color: var(--cinnabar);
+}
+
+.iconbutton {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--ink-muted);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.iconbutton:hover {
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+
+/* 全界面上只有两个实心块，这是其中之一：记一件新的事 */
+.iconbutton--solid {
+  background: var(--ink);
+  color: var(--sheet);
+}
+
+.iconbutton--solid:hover {
+  background: var(--indigo);
+  color: var(--sheet);
+}
+
+/* 换个主题是一次整屏的底色变化。给它 150ms，免得像闪了一下；
+   单个元素的过渡不加 —— 那样整个界面会「糊」成一片，反而不干净。
+   prefers-reduced-motion 时由文件开头那条全局规则掐掉。 */
+body,
+.app,
+.app__body,
+.page__body,
+.head,
+.topbar,
+.bottombar {
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+/* ---- 覆盖式视图（编辑器 / 设置 / 收件箱）的顶栏 ---- */
 
 .topbar {
   flex: none;
@@ -98,19 +262,29 @@ ul {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px 8px;
+  padding: 10px 12px 9px;
   border-bottom: 1px solid var(--rule);
 }
 
+.topbar__lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .topbar__title {
-  font-size: 14px;
-  font-weight: 600;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
 }
 
 .topbar__date {
-  margin-left: 6px;
-  font-size: 12px;
-  font-weight: 400;
+  margin-left: 2px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
   color: var(--ink-muted);
 }
 
@@ -120,136 +294,241 @@ ul {
   gap: 6px;
 }
 
-.iconbutton {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  font-size: 16px;
-  line-height: 1;
-  color: var(--ink-muted);
-}
-
-.iconbutton:hover {
-  background: var(--row-hover);
-  color: var(--ink);
-}
-
-.bottombar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 12px;
-  border-top: 1px solid var(--rule);
+.topbar__button {
+  padding: 4px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
   font-size: 12px;
-}
-
-.bottombar__link {
   color: var(--ink-muted);
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
 }
 
-.bottombar__link:hover {
-  color: var(--ink);
-  text-decoration: underline;
+.topbar__button:hover {
+  border-color: var(--indigo);
+  color: var(--indigo);
+  background: var(--indigo-soft);
 }
 
-.bottombar__state {
-  color: var(--ink-faint);
+/* 另一个实心块：提交 */
+.topbar__button--primary {
+  border-color: transparent;
+  background: var(--ink);
+  color: var(--sheet);
 }
 
-.bottombar__state--off {
-  color: var(--urgency-soon);
+.topbar__button--primary:hover {
+  border-color: transparent;
+  background: var(--indigo);
+  color: var(--sheet);
 }
 
-/* ---- 分段与行 ---- */
+/* ---- 分段与刻度尺 ----
+ *
+ * 横向几何（改一处要全改，所以集中记在这）：
+ *   游标 3px → 时刻列 52px（含左内边距 9px）→ 刻度列 17px
+ *   竖轴落在 x = 55px 上；分段标签的 padding-left 72px = 55 + 9(粗刻度) + 8(间距)
+ */
 
 .section {
   padding-bottom: 2px;
 }
 
 .section__label {
-  padding: 9px 12px 3px;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--ink-faint);
+  position: relative;
+  margin: 0;
+  padding: 10px 10px 6px 72px;
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  color: var(--ink-muted);
 }
 
-/* 「逾期」段的存在感：标题转朱红（规格 §6.2） */
+/* 段标签也要把竖轴续上，否则轴会在每个分段标题处断开 */
+.section__label::before {
+  content: '';
+  position: absolute;
+  left: 55px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule);
+}
+
+/* 分段处的粗刻度：轴上的大分格 */
+.section__label::after {
+  content: '';
+  position: absolute;
+  left: 55px;
+  top: 50%;
+  width: 9px;
+  height: 1px;
+  background: var(--rule-strong);
+}
+
 .section--overdue .section__label {
-  color: var(--urgency-overdue);
+  color: var(--cinnabar);
+}
+
+.section--overdue .section__label::after {
+  background: var(--cinnabar);
+}
+
+.section__count {
+  margin-left: 7px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  letter-spacing: 0;
+  opacity: 0.7;
 }
 
 .row {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-right: 12px;
-  min-height: 30px;
+  min-height: 34px;
+  padding-right: 10px;
+  transition: background-color 120ms ease;
 }
 
 .row:hover {
-  background: var(--row-hover);
+  background: var(--hover);
 }
 
 .row--cursor {
-  background: var(--row-hover);
+  background: var(--cursor-bg);
 }
 
-/* 键盘游标：行最左侧 2px 竖线（规格 §6.6） */
+/* 键盘游标：行最左侧 3px 竖线 */
 .row__cursor {
   flex: none;
-  width: 2px;
+  width: 3px;
   align-self: stretch;
   background: transparent;
 }
 
 .row--cursor .row__cursor {
-  background: var(--ink);
-}
-
-/* 紧迫度色条：界面里唯一的颜色信号（规格 §9.3） */
-.row__bar {
-  flex: none;
-  width: 3px;
-  align-self: stretch;
-}
-
-.row__bar[data-urgency='none'] {
-  background: var(--urgency-none);
-}
-
-.row__bar[data-urgency='soon'] {
-  background: var(--urgency-soon);
-}
-
-.row__bar[data-urgency='overdue'] {
-  background: var(--urgency-overdue);
+  background: var(--indigo);
 }
 
 .row__clock {
   flex: none;
-  width: 40px;
+  width: 52px;
+  padding-left: 9px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
+  letter-spacing: -0.02em;
   color: var(--ink-muted);
+  white-space: nowrap;
 }
 
-.row__clock--overdue {
-  color: var(--urgency-overdue);
+.row__clock[data-urgency='soon'] {
+  color: var(--indigo);
+}
+
+.row__clock[data-urgency='overdue'] {
+  color: var(--cinnabar);
+}
+
+/* 刻度列。行与行首尾相接，逐行画出来的竖轴拼起来就是一根通到底的线 */
+.row__tick {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  width: 17px;
+}
+
+.row__tick::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule);
+}
+
+/* 刻度本体。三档长度：7 / 13 / 21px */
+.row__tick::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: var(--tick-x, 0);
+  width: var(--tick-w, 7px);
+  height: var(--tick-h, 1.5px);
+  background: var(--tick-c, var(--tick-none));
+  transform: translateY(-50%);
+}
+
+.row__tick[data-urgency='soon'] {
+  --tick-x: 0px;
+  --tick-w: 13px;
+  --tick-h: 2px;
+  --tick-c: var(--indigo);
+}
+
+/* 逾期：越过轴向左伸出去，像一根冲过限位刻度的针 */
+.row__tick[data-urgency='overdue'] {
+  --tick-x: -6px;
+  --tick-w: 21px;
+  --tick-h: 2px;
+  --tick-c: var(--cinnabar);
 }
 
 .row__dot {
   flex: none;
-  width: 14px;
-  height: 14px;
-  margin-left: 12px;
+  width: 15px;
+  height: 15px;
+  margin: 0 9px;
   border: 1.5px solid var(--rule-strong);
   border-radius: 50%;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 
 .row__dot:hover {
-  border-color: var(--ink);
+  border-color: var(--indigo);
+  background: var(--indigo-soft);
+}
+
+/* 已完成的勾：填实心底、里面一枚纸色的勾。
+   勾用两条 border 拼（不引 SVG）：一个 4.5×8 的盒子只留右边和下边，
+   转 43° 就是那个对勾，角的圆润度由 border-radius 的 2px 给。 */
+.row__dot--on {
+  position: relative;
+  border-color: var(--indigo);
+  background: var(--indigo);
+}
+
+.row__dot--on::after {
+  content: '';
+  position: absolute;
+  left: 3.5px;
+  top: 1.5px;
+  width: 4.5px;
+  height: 8px;
+  border: solid var(--surface);
+  border-width: 0 1.8px 1.8px 0;
+  border-radius: 0 0 2px 0;
+  box-sizing: border-box;
+}
+
+.row__dot--on:hover {
+  border-color: var(--indigo);
+  background: var(--indigo);
+  /* 空心勾 hover 时是「变成蓝色」，实心勾已经在了，只做一点点提亮 */
+  opacity: 0.82;
+}
+
+/* 「今天已经打过卡」的周期任务勾：点不动就真的别让它看起来能点 */
+.row__dot[disabled] {
+  pointer-events: none;
+  cursor: default;
 }
 
 .row__title {
@@ -259,31 +538,63 @@ ul {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  font-size: 13.5px;
+  cursor: pointer;
 }
 
-.row__important {
-  flex: none;
-  width: 3px;
-  height: 3px;
-  border-radius: 1px;
-  background: var(--ink-muted);
+/* 「重要」只用字重说，不另加一个色块 —— 界面上每多一个标记，
+   刻度和朱砂的信号就弱一分 */
+.row--important .row__title {
+  font-weight: 600;
+}
+
+/* 已完成清单里的行：标题淡下去，让那笔墨线成为主角。
+   注意**不加** .row--exiting / .row--done —— 那是退场动画，
+   这里的行是长住的 */
+.row--settled .row__title {
+  color: var(--ink-muted);
+}
+
+/* 已经划掉的字不再需要「重要」的字重强调，两者叠加只会更黑 */
+.row--settled.row--important .row__title {
+  font-weight: 400;
+}
+
+/*
+ * 标题**文字**本身。墨线要贴的是字的宽度，不是上面那个 flex:1 撑满整行的盒子。
+ * 这个盒子当 .strike 的包含块，所以短标题的墨线也贴着字（±2px）。
+ *
+ * 只能是 inline（默认值），不能改成 inline-block：父级的 text-overflow: ellipsis
+ * 只对块容器自己的行内内容生效，一旦文字被装进 inline-block，长标题就不再出省略号
+ * 而是整块溢出。
+ */
+.row__title-text {
+  position: relative;
 }
 
 .row__streak {
   flex: none;
+  margin-left: 8px;
   font-size: 11px;
-  color: var(--ink-faint);
+  color: var(--ink-muted);
 }
 
 .row__more {
   flex: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 3px;
-  color: var(--ink-faint);
-  opacity: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 2px;
   font-size: 14px;
   line-height: 1;
+  color: var(--ink-faint);
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .row:hover .row__more,
@@ -292,49 +603,48 @@ ul {
   opacity: 1;
 }
 
-/* 焦点环是键盘可用的前提：opacity:0 会连带把 :focus-visible 的焦点环一起透明掉，
-   键盘 Tab 到「更多」时屏幕上什么都不亮。这里在 focus-visible 时强制显示 */
+/* 焦点环是键盘可用的前提：opacity:0 会连带把 :focus-visible 的焦点环一起透明掉 */
 .row__more:focus-visible {
   opacity: 1;
 }
 
 .row__more:hover {
-  background: var(--rule);
-  color: var(--ink);
+  background: var(--indigo-soft);
+  color: var(--indigo);
 }
 
-/* 退场中的行不接受交互 —— 别让人点到一条正在消失的行（规格 §12） */
+/* 退场中的行不接受交互 —— 别让人点到一条正在消失的行 */
 .row--exiting {
   pointer-events: none;
 }
 
-/* 已删除：灰色 + 撤销按钮，等 5 秒 */
 .row--removed {
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 .row__undo {
   flex: none;
-  padding: 2px 6px;
+  margin-right: 6px;
+  padding: 2px 8px;
   border: 1px solid var(--rule-strong);
-  border-radius: 3px;
+  border-radius: 2px;
   font-size: 11px;
   color: var(--ink-muted);
 }
 
 .row__undo:hover {
-  color: var(--ink);
-  border-color: var(--ink-muted);
+  border-color: var(--indigo);
+  color: var(--indigo);
 }
 
 /* 已删除行整行被 .row--exiting 设为 pointer-events:none，
-   只把「撤销」这一个按钮单独放开（New problem 1）：5 秒里只有它能点、能生效，
+   只把「撤销」这一个按钮单独放开：5 秒里只有它能点、能生效，
    圆点与标题仍点不动，避免给已软删任务误写 completedAt。 */
 .row--removed .row__undo {
   pointer-events: auto;
 }
 
-/* 完成退场时整行降透明度再移出（规格 §9.5 第二拍） */
+/* 完成退场时整行降透明度再移出 */
 .row--done {
   animation: row-leave 260ms ease-out 260ms forwards;
 }
@@ -342,22 +652,98 @@ ul {
 @keyframes row-leave {
   to {
     opacity: 0.35;
-    transform: translateY(-4px);
+    transform: translateY(-3px);
   }
 }
 
-/* ---- 空状态 ---- */
+/* 从通知点进来时那 2 秒的高亮 */
+.row--highlight {
+  background: var(--indigo-soft);
+}
+
+/* 清单池的行没有「完成」这个动作，换成它唯一该做的那个动作 */
+.row__today {
+  flex: none;
+  margin: 0 9px;
+  padding: 2px 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.row__today:hover {
+  border-color: var(--indigo);
+  color: var(--indigo);
+  background: var(--indigo-soft);
+}
+
+/*
+ * 划掉的那一笔。覆盖在标题上，不参与布局。
+ *
+ * 包含块是 .row__title-text（文字的宽度），不是 .row__title 那个 flex:1 的盒子 ——
+ * 所以短标题的墨线也贴着字。left: -2px 让墨迹落在字的两侧。
+ *
+ * 宽度与高度由 StrikeLine 量出来写在行内。stroke 宽度用 vector-effect 保持
+ * 「不随 viewBox 缩放变形」，代价是 dasharray/dashoffset 的单位也变成了 CSS px。
+ */
+.strike {
+  position: absolute;
+  left: -2px;
+  top: 0;
+  height: 100%;
+  /* 路径终点与收笔回勾本来就落在 svg viewport 之外，默认 overflow:hidden 会切平 */
+  overflow: visible;
+}
+
+.strike path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-opacity: 0.85;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* 粗细不均：两条 path 叠在同一条 d 上，各画各的宽度。
+   细段扫全程，粗段被 clipPath 限制在中段，同色墨叠起来取的是并集 */
+.strike__full {
+  stroke-width: 1.1;
+}
+
+.strike__mid {
+  stroke-width: 1.6;
+}
+
+@keyframes strike-draw {
+  from {
+    stroke-dashoffset: var(--strike-len, 120);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ---- 空状态：这里唯一允许出现的大字 ---- */
 
 .empty {
-  padding: 40px 16px;
+  padding: 72px 20px 0;
   text-align: center;
+  font-family: var(--font-display);
+  font-size: 19px;
   color: var(--ink-muted);
 }
 
 .empty__hint {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--ink-faint);
+  margin-top: 10px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
 }
 
 /* ---- 顶部提示条 / 一次性提示 ---- */
@@ -366,15 +752,16 @@ ul {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 7px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--rule);
-  border-left: 3px solid var(--urgency-soon);
-  background: var(--urgency-soon-bg);
+  border-left: 3px solid var(--indigo);
+  background: var(--indigo-soft);
   font-size: 12px;
 }
 
 .noticebar--error {
-  border-left-color: var(--urgency-overdue);
+  border-left-color: var(--cinnabar);
+  background: var(--cinnabar-soft);
 }
 
 .noticebar__text {
@@ -384,13 +771,17 @@ ul {
 
 .noticebar__action {
   flex: none;
-  color: var(--ink-muted);
+  color: var(--indigo);
   text-decoration: underline;
+}
+
+.noticebar--error .noticebar__action {
+  color: var(--cinnabar);
 }
 
 .noticebar__more {
   flex: none;
-  color: var(--ink-faint);
+  color: var(--ink-muted);
 }
 
 .noticebar__close {
@@ -400,23 +791,27 @@ ul {
   line-height: 1;
 }
 
+.noticebar__close:hover {
+  color: var(--ink);
+}
+
 .flash {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 34px;
+  bottom: 42px;
   display: flex;
   justify-content: center;
   pointer-events: none;
 }
 
 .flash__inner {
-  padding: 4px 10px;
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
+  padding: 5px 12px;
+  border-radius: 14px;
+  background: var(--ink);
+  color: var(--sheet);
   font-size: 12px;
-  color: var(--ink-muted);
+  box-shadow: var(--shadow-pop);
 }
 
 /* ---- popover 菜单 ---- */
@@ -424,10 +819,10 @@ ul {
 .rowmenu {
   position: fixed;
   z-index: 20;
-  min-width: 132px;
+  min-width: 140px;
   padding: 4px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
 }
@@ -435,18 +830,318 @@ ul {
 .rowmenu__item {
   display: block;
   width: 100%;
-  padding: 5px 8px;
-  border-radius: 4px;
+  padding: 6px 9px;
+  border-radius: 2px;
   text-align: left;
-  font-size: 12px;
+  font-size: 12.5px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .rowmenu__item:hover {
-  background: var(--row-hover);
+  background: var(--indigo-soft);
+  color: var(--indigo);
 }
 
 .rowmenu__item--danger {
-  color: var(--urgency-overdue);
+  color: var(--cinnabar);
+}
+
+.rowmenu__item--danger:hover {
+  background: var(--cinnabar-soft);
+  color: var(--cinnabar);
+}
+
+/* ---- 浮层：日历与时间轮共用 ----
+ *
+ * 自绘而不是用原生 `<input type="date">` / `type="time">` 的下拉：
+ * 那一块是**操作系统画的**，改不了。浅色界面里弹一块系统灰、深色界面里
+ * 那块日历还是亮的（`color-scheme` 只管输入框本身，管不到弹出的日历）。
+ * 日期是这个应用的主角，主角不能长着一张别人的脸。
+ */
+
+.popover {
+  position: fixed;
+  z-index: 30;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 110ms ease-out;
+}
+
+/* 只做透明度与一点点位移。别加 scale —— 格子上的文字会跟着糊一下 */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.popover--cal {
+  padding: 8px 8px 7px;
+}
+
+.popover--time {
+  padding: 8px;
+}
+
+/* ---- 日期控件 ---- */
+
+.datefield {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 12.5px;
+  white-space: nowrap;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.datefield:hover,
+.datefield--open {
+  border-color: var(--indigo);
+  background: var(--indigo-soft);
+}
+
+/* 这个控件显示的就是答案本身，所以它比标签重；而「周五」是补充信息 */
+.datefield__text {
+  font-weight: 600;
+}
+
+.datefield__dow {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+/* 「今天 / 明天 / 3 天后」。人对相对说法的确定感远高于「9月19日」 */
+.datefield__rel {
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: var(--indigo-soft);
+  color: var(--indigo);
+  font-size: 11px;
+}
+
+.datefield--open .datefield__rel {
+  background: var(--surface);
+}
+
+.datefield__caret {
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+/* ---- 月历 ---- */
+
+.cal {
+  /* 7 列 × 32px + 6 条 1px 缝。固定宽度让翻月时格子不跳 */
+  width: 230px;
+}
+
+.cal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+}
+
+.cal__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.cal__nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--ink-muted);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.cal__nav:hover {
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+
+.cal__dows,
+.cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.cal__dows {
+  margin-bottom: 3px;
+}
+
+.cal__dow {
+  text-align: center;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
+
+/* 周末那两列淡一档 —— 提醒类应用里它们本来就该被一眼分开 */
+.cal__dow--rest {
+  color: var(--ink-faint);
+}
+
+.cal__grid {
+  gap: 1px;
+}
+
+.cal__cell {
+  height: 28px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--ink);
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.cal__cell:hover {
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+
+/* 邻月补进来的日子：点得动，只是不抢眼 */
+.cal__cell--out {
+  color: var(--ink-faint);
+}
+
+/* 今天用一圈细环，不填色 —— 填色是「选中」的语义，两者不能混 */
+.cal__cell--today {
+  box-shadow: inset 0 0 0 1px var(--indigo-line);
+  color: var(--indigo);
+}
+
+.cal__cell--on,
+.cal__cell--on:hover {
+  background: var(--ink);
+  color: var(--sheet);
+  box-shadow: none;
+}
+
+.cal__quick {
+  display: flex;
+  gap: 4px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+}
+
+.cal__chip {
+  flex: 1;
+  padding: 3px 0;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.cal__chip:hover {
+  border-color: var(--indigo);
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+
+/* ---- 时间控件 ---- */
+
+.timefield {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 12.5px;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.timefield:hover,
+.timefield--open {
+  border-color: var(--indigo);
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+
+.timepick {
+  display: flex;
+  gap: 8px;
+}
+
+.timepick__label {
+  margin-bottom: 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  color: var(--ink-muted);
+}
+
+.timepick__grid {
+  display: grid;
+  gap: 1px;
+}
+
+/* 时：4 列 6 行 = 24。分：3 列 4 行 = 12 档（5 分钟一档） */
+.timepick__grid--h {
+  grid-template-columns: repeat(4, 32px);
+  grid-auto-rows: 24px;
+}
+
+.timepick__grid--m {
+  grid-template-columns: repeat(3, 34px);
+  grid-auto-rows: 24px;
+}
+
+.timepick__cell {
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--ink-muted);
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.timepick__cell:hover {
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+
+.timepick__cell--on,
+.timepick__cell--on:hover {
+  background: var(--ink);
+  color: var(--sheet);
 }
 
 /* ---- 覆盖式视图（编辑器 / 设置）---- */
@@ -458,18 +1153,34 @@ ul {
 }
 
 .page__body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px 12px 16px;
+  padding: 2px 12px 20px;
+}
+
+.group__label {
+  margin-top: 16px;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--rule);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  color: var(--ink-muted);
+}
+
+.group__label:first-child {
+  margin-top: 0;
+  padding-top: 14px;
+  border-top: none;
 }
 
 .field {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 0;
+  gap: 12px;
+  padding: 8px 0;
   border-bottom: 1px solid var(--rule);
+}
+
+.field:last-child {
+  border-bottom: none;
 }
 
 .field--stack {
@@ -478,14 +1189,15 @@ ul {
 
 .field__label {
   flex: none;
-  width: 76px;
+  width: 68px;
+  font-size: 12px;
   color: var(--ink-muted);
 }
 
 .field--stack .field__label {
   display: block;
   width: auto;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 
 .field__control {
@@ -494,74 +1206,298 @@ ul {
 }
 
 .field__hint {
-  margin-top: 4px;
+  margin-top: 5px;
   font-size: 11px;
-  color: var(--ink-faint);
+  line-height: 1.55;
+  color: var(--ink-muted);
 }
 
-.segmented {
+.field__hint--warn {
+  color: var(--cinnabar);
+}
+
+/* 同一行里排几个控件（时刻 + 说明、数字 + 单位） */
+.field__control--row {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
 }
 
-.segmented__item {
-  padding: 3px 9px;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
+.field__control--row input[type='number'] {
+  width: 68px;
+  flex: none;
+}
+
+.unit {
+  flex: none;
   font-size: 12px;
   color: var(--ink-muted);
 }
 
+/* 分段控件：格子紧贴，1px 的缝里透出容器底色，就是发丝分隔线 */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--rule);
+}
+
+.segmented__item {
+  padding: 3px 10px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-align: center;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.segmented__item:hover {
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+
 .segmented__item--on {
-  border-color: var(--ink-muted);
-  background: var(--row-hover);
-  color: var(--ink);
+  background: var(--ink);
+  color: var(--sheet);
 }
 
-/* 从通知点进来时那 2 秒的高亮（规格 §6.7） */
-.row--highlight {
-  background: var(--urgency-soon-bg);
+.segmented__item--on:hover {
+  background: var(--ink);
+  color: var(--sheet);
 }
 
-/* 段标题是 h2，但视觉上是 11px 的小标签 —— 去掉默认的粗体与间距 */
-.section__label {
-  margin: 0;
-  font-weight: 500;
+/* overflow:hidden 会切掉外翻的焦点环，往回缩一格 */
+.segmented__item:focus-visible,
+.daygrid__item:focus-visible {
+  outline-offset: -2px;
 }
 
-.topbar__title {
-  margin: 0;
-}
-
-/*
- * 划掉的那一笔。覆盖在标题上，不参与布局。
+/* 「每月几号」那 31 个格子。
  *
- * stroke 宽度用 vector-effect 保持"不随 viewBox 缩放变形"——
- * viewBox 是 100×8 的抽象坐标，实际宽度随窗口变，不加这个会拉成一条粗带。
- */
-.strike {
-  position: absolute;
-  left: -2px;
-  right: -2px;
-  top: 0;
+ * 和月历的 `.cal__cell` 用同一套尺寸（28px 高、2px 圆角、1px 缝），所以
+ * 它是「月历的另一种读法」而不是另一套控件。**去掉外框**：之前那个一圈
+ * 边框加底色把它包成了「一个表单控件」，现在它直接摊在纸面上，像一张月历。
+ *
+ * 它和浮层里那张月历不是一回事，别混：这里选的是**每月固定的第几天**，
+ * 与星期几落在哪儿无关，所以只能排成 1..31 的数阵，不能按周对齐。 */
+.daygrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.daygrid__item {
+  height: 26px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.daygrid__item:hover {
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+
+.daygrid__item--on,
+.daygrid__item--on:hover {
+  background: var(--ink);
+  color: var(--sheet);
+}
+
+/* 复选框 + 文案。原生勾选框在暗色下靠 color-scheme 跟着走 */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.check input {
+  flex: none;
+  accent-color: var(--indigo);
+}
+
+.page__foot {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.linkbutton {
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-decoration: underline;
+}
+
+.linkbutton:hover {
+  color: var(--indigo);
+}
+
+.path {
+  word-break: break-all;
+  user-select: text;
+}
+
+/* ---- 底栏 ---- */
+
+.bottombar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--rule);
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+.bottombar__link {
+  color: var(--ink-muted);
+  transition: color 120ms ease;
+}
+
+.bottombar__link:hover {
+  color: var(--indigo);
+}
+
+/* 左边两个账本入口（收件箱 / 已完成）。用一条细竖线分开 ——
+   两个都叫「· N 件」的按钮挨在一起时，光靠 gap 会读成一个句子。
+   竖线挂在第二个按钮的 ::before 上（不是独立的 flex 子项）：DOM 里只多一个
+   伪元素，不用为一条线加一个空 span。它落在按钮内，所以那 1px 也算按钮的
+   点击区 —— 一条 9px 高的线，不值得为它再包一层。 */
+.bottombar__links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bottombar__links > * + *::before {
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 9px;
+  margin-right: 10px;
+  vertical-align: -1px;
+  background: var(--rule-strong);
+}
+
+.bottombar__state {
+  color: var(--ink-muted);
+  transition: color 120ms ease;
+}
+
+.bottombar__state:hover {
+  color: var(--ink-muted);
+}
+
+/* 关了通知比暂停更值得说：关了就真的不会响 */
+.bottombar__state--off {
+  color: var(--cinnabar);
+}
+
+.bottombar__state--off:hover {
+  color: var(--cinnabar);
+}
+
+.bottombar__danger {
+  font-size: 12px;
+  color: var(--cinnabar);
+}
+
+.bottombar__danger:hover {
+  text-decoration: underline;
+}
+
+/* ---- 快速添加小窗（无边框窗口，整页就是它）---- */
+
+.quickadd {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   height: 100%;
-  overflow: visible;
+  padding: 12px 14px;
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
 }
 
-.strike path {
-  fill: none;
-  stroke: var(--ink);
-  stroke-opacity: 0.85;
-  stroke-linecap: round;
-  stroke-width: 1.4;
-  vector-effect: non-scaling-stroke;
+/* 输入框吃掉多余的高度，按钮行就永远贴在底部 ——
+   窗口高度不需要和内容像素级对齐，松一点也不会有个洞 */
+.quickadd__title {
+  flex: 1 1 auto;
+  min-height: 36px;
+  padding: 0 0 4px;
+  border: none;
+  border-bottom: 1px solid var(--rule-strong);
+  border-radius: 0;
+  background: transparent;
+  font-size: 16px;
 }
 
-@keyframes strike-draw {
-  from {
-    stroke-dashoffset: var(--strike-len, 120);
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
+.quickadd__title:focus {
+  border-bottom-color: var(--indigo);
+  outline-offset: 0;
+}
+
+.quickadd__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quickadd__btn {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.quickadd__btn:hover {
+  border-color: var(--indigo);
+  color: var(--indigo);
+  background: var(--indigo-soft);
+}
+
+.quickadd__btn--primary {
+  border-color: transparent;
+  background: var(--ink);
+  color: var(--sheet);
+}
+
+.quickadd__btn--primary:hover {
+  border-color: transparent;
+  background: var(--indigo);
+  color: var(--sheet);
+}
+
+/* 把「全天那三个」和「带时刻那两个」在视觉上分开 */
+.quickadd__sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 2px;
+  background: var(--rule);
+}
+
+.quickadd__time {
+  flex: none;
+  width: 92px;
 }

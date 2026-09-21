@@ -34,7 +34,13 @@ export function SectionList({
 
   return (
     <section className={section === 'overdue' ? 'section section--overdue' : 'section'}>
-      <h2 className="section__label">{label}</h2>
+      {/* 段标签挂在竖轴上（::before 续轴、::after 是分格粗刻度），
+          计数用等宽数字 —— 「逾期 2」里的 2 和「接下来 5」里的 5 要能竖着对齐。
+          名字单独包一层，这样 .section__name / .section__count 都能直接选到 */}
+      <h2 className="section__label">
+        <span className="section__name">{label}</span>
+        <span className="section__count">{tasks.length}</span>
+      </h2>
       <ul>
         {tasks.map((task) => {
           const shared = {
