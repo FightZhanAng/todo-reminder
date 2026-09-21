@@ -37,7 +37,7 @@ PowerShell 里 `Remove-Item Env:ELECTRON_RUN_AS_NODE` 后直接调 exe 才能跑
 
 ```powershell
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-Set-Location 'D:\WorkBuddy\我的工作台\todo-reminder'
+Set-Location <项目根>
 & '.\node_modules\electron\dist\electron.exe' .
 ```
 
@@ -215,9 +215,9 @@ tooltip 和右键菜单都正常」—— 极易误判成图标和任务栏撞�
 
 ```powershell
 Remove-Item Env:\ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-Set-Location 'D:\WorkBuddy\我的工作台\todo-reminder'
+Set-Location <项目根>            # 就是这个仓库的目录
 Start-Process '.\node_modules\electron\dist\electron.exe' `
-  -ArgumentList '.', '--user-data-dir=C:\Users\zheng\AppData\Local\Temp\todo-accept'
+  -ArgumentList '.', "--user-data-dir=$env:TEMP\todo-accept"
 ```
 
 `app.getPath('userData')` 会跟着 `--user-data-dir` 走，所以数据文件落在临时目录，
