@@ -112,6 +112,24 @@ const todayTasks = [
     createdAt: now - 120_000, updatedAt: now, deletedAt: null, firedFor: null
   },
 
+  // ---- 「以后」这本账的素材 ----
+  // 明天及以后的截止任务**不会出现在看板上**（groupToday 四段全只看今天），
+  // 所以看板那些段计数一条都不受影响 —— 它们唯一的去处是底栏那枚「以后」入口
+  {
+    kind: 'deadline', id: 'future-tomorrow', title: '明天的评审', important: false,
+    createdAt: now - 86_400_000, updatedAt: now, deletedAt: null,
+    firedFor: null,
+    dueAt: startOfToday + 86_400_000 + 17 * HOUR, allDay: false, leadMin: 10,
+    snoozeUntil: null, completedAt: null
+  },
+  {
+    kind: 'deadline', id: 'future-far', title: '下下周的搬家', important: false,
+    createdAt: now - 86_400_000, updatedAt: now, deletedAt: null,
+    firedFor: null,
+    dueAt: startOfToday + 10 * 86_400_000, allDay: true, leadMin: 0,
+    snoozeUntil: null, completedAt: null
+  },
+
   // ---- 已完成这本账的素材 ----
   // 完成只写 completedAt / lastDoneDay，所以这几条**不会出现在看板上**
   // （groupToday 把它们过滤掉了）—— 板上的段计数因此一条都不受影响
@@ -362,19 +380,56 @@ async function mainWindowPass() {
       count: links.length,
       texts: links.map(e => e.textContent),
       seps: links.map(e => getComputedStyle(e, '::before').height),
-      gap: r.length === 2 ? Math.round(r[1].left - r[0].right) : 0,
-      fits: r.length === 2 && r[1].right <= document.querySelector('.bottombar').getBoundingClientRect().right
+      gap: r.length >= 2 ? Math.round(r[1].left - r[0].right) : 0,
+      fits: r.length > 0 && r[r.length - 1].right <= document.querySelector('.bottombar').getBoundingClientRect().right
     }
   })()`)
-  ok('底栏是两个账本入口', entries.count === 2, entries)
-  ok('已完成入口常驻并带件数', /^已完成 · 5 件$/.test(entries.texts[1] || ''), entries.texts)
-  // 两个都叫「· N 件」的入口挨在一起会读成一句话，中间那条细竖线必须真的渲染出来。
-  // 竖线挂在第二个按钮的 ::before 上，所以按钮矩形之间的 gap 只是 flex 间距，
+  ok('底栏是三个账本入口', entries.count === 3, entries)
+  ok('以后入口带件数', /^以后 · 2 件$/.test(entries.texts[1] || ''), entries.texts)
+  ok('已完成入口常驻并带件数', /^已完成 · 5 件$/.test(entries.texts[2] || ''), entries.texts)
+  // 三个都叫「· N 件」的入口挨在一起会读成一句话，中间那条细竖线必须真的渲染出来。
+  // 竖线挂在每个按钮自己的 ::before 上，所以按钮矩形之间的 gap 只是 flex 间距，
   // 实际留白 = gap + 1(线) + margin-right(10)
-  ok('两个入口之间有分隔线', entries.seps[1] === '9px' && entries.gap >= 9, entries)
-  ok('两个入口在 420 宽里放得下', entries.fits === true, entries)
+  ok('入口之间都有分隔线', entries.seps[1] === '9px' && entries.seps[2] === '9px' && entries.gap >= 9, entries)
+  ok('三个入口在 420 宽里放得下', entries.fits === true, entries)
 
+  // ---- 以后这本账 ----
   await evalIn(win, `(document.querySelectorAll('.bottombar__link')[1].click(), 'ok')`)
+  await sleep(300)
+  const future = await evalIn(win, `(() => {
+    const rows = [...document.querySelectorAll('.row')]
+    return {
+      title: (document.querySelector('.topbar__title') || {}).textContent,
+      sections: [...document.querySelectorAll('.section__name')].map(e => e.textContent),
+      counts: [...document.querySelectorAll('.section__count')].map(e => e.textContent),
+      titles: [...document.querySelectorAll('.row__title-text')].map(e => e.textContent),
+      clocks: [...document.querySelectorAll('.row__clock')].map(e => e.textContent),
+      // 全天那条没有时刻，但时刻列必须照样渲染 —— 否则那一段的竖轴会错位
+      clockCells: document.querySelectorAll('.row__clock').length,
+      dots: document.querySelectorAll('.row__dot').length
+    }
+  })()`)
+  ok('以后顶栏标题带件数', /^以后/.test(future.title || '') && /2 件/.test(future.title || ''), future.title)
+  ok('以后按天分两段', future.sections.length === 2 && future.sections[0] === '明天', future.sections)
+  ok('明天那段一条', future.counts[0] === '1', future.counts)
+  ok('一周以外换成日期加星期', /^\d+月\d+日 周.$/.test(future.sections[1] || ''), future.sections)
+  ok('以后列的是那两条', future.titles.join(','), '明天的评审,下下周的搬家')
+  ok('有时刻的那条显示截止时刻', future.clocks[0] === '17:00', future.clocks)
+  ok('全天那条时刻列是空的但仍占位',
+    future.clocks[1] === '' && future.clockCells === 2, future)
+  ok('以后的行可以勾完成', future.dots === 2, future)
+
+  await evalIn(win, `(document.querySelector('.row .row__more').click(), 'ok')`)
+  await sleep(200)
+  const futureMenu = await evalIn(win, `[...document.querySelectorAll('.rowmenu__item')].map(e => e.textContent)`)
+  ok('以后的行菜单第一项是完成', futureMenu[0] === '完成', futureMenu)
+  await evalIn(win, `(document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })), 'ok')`)
+  await sleep(150)
+  await evalIn(win, `(document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 'ok')`)
+  await sleep(300)
+  ok('Esc 从以后回到看板', (await evalIn(win, `!!document.querySelector('.dateline')`)) === true)
+
+  await evalIn(win, `(document.querySelectorAll('.bottombar__link')[2].click(), 'ok')`)
   await sleep(300)
   const done = await evalIn(win, `(() => {
     const strikes = [...document.querySelectorAll('.strike')]

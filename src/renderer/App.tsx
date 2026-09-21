@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import { Board } from './components/Board'
 import { DoneView } from './components/DoneView'
+import { FutureView } from './components/FutureView'
 import { Inbox } from './components/Inbox'
 import { NoticeBar } from './components/NoticeBar'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -43,6 +44,8 @@ function renderView(state: ReturnType<typeof useAppState>): JSX.Element {
       return <Inbox state={state} />
     case 'done':
       return <DoneView state={state} />
+    case 'future':
+      return <FutureView state={state} />
     case 'settings':
       return <SettingsPanel state={state} />
     case 'edit':

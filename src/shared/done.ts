@@ -1,5 +1,5 @@
 import { relativeDayLabel, tsFromDayKey } from './calendar'
-import { WEEKDAYS, dayKey, startOfDay } from './time'
+import { dayKey, startOfDay } from './time'
 import type { DeadlineTask, RecurringTask, Task } from './types'
 
 /**
@@ -105,18 +105,6 @@ export function collectDone(tasks: Task[], now: number): DoneLedger {
     total: done.length,
     count: done.length + recurring.length
   }
-}
-
-/**
- * 分组的标题。「今天 / 昨天 / 前天」用相对说法 —— 看这本账时最常问的是
- * 「这是最近的事吗」，而人对「昨天」的确定感远高于「9月19日」。
- * 再往前（一周以外）相对说法就没意义了，换成日期 + 星期。
- */
-export function doneDayLabel(dayStart: number, now: number): string {
-  const rel = relativeDayLabel(dayStart, now)
-  if (rel !== null) return rel
-  const d = new Date(dayStart)
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAYS[d.getDay()]}`
 }
 
 /**

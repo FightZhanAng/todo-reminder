@@ -47,6 +47,7 @@ import {
   CAL_HEADERS,
   CN_MONTHS,
   dayKeyOf,
+  dayLabel,
   monthGrid,
   monthLabel,
   nextWeekdayAfter,
@@ -54,7 +55,8 @@ import {
   shiftMonth,
   tsFromDayKey
 } from '../src/shared/calendar'
-import { collectDone, doneCount, doneDayLabel, recurringDoneLabel } from '../src/shared/done'
+import { collectDone, doneCount, recurringDoneLabel } from '../src/shared/done'
+import { collectUpcoming, upcomingCount } from '../src/shared/future'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -1529,12 +1531,14 @@ console.log('\n--- done.ts（已完成这本账）---')
   // 底栏计数必须和账本一致 —— 两处各写一份过滤迟早只有一份是对的
   check('doneCount 与账本一致', doneCount(all), led.count)
 
-  // 标题：近三天用相对说法，一周以外换成日期 + 星期
-  check('账本标题：今天', doneDayLabel(at(2026, 9, 16), now), '今天')
-  check('账本标题：昨天', doneDayLabel(at(2026, 9, 15), now), '昨天')
-  check('账本标题：前天', doneDayLabel(at(2026, 9, 14), now), '前天')
-  check('账本标题：一周内仍是相对说法', doneDayLabel(at(2026, 9, 13), now), '3 天前')
-  check('账本标题：一周外换成日期加星期', doneDayLabel(at(2026, 9, 1), now), '9月1日 周二')
+  // 日名：近三天用相对说法，一周以外换成日期 + 星期（已完成与「以后」共用）
+  check('日名：今天', dayLabel(at(2026, 9, 16), now), '今天')
+  check('日名：昨天', dayLabel(at(2026, 9, 15), now), '昨天')
+  check('日名：前天', dayLabel(at(2026, 9, 14), now), '前天')
+  check('日名：一周内仍是相对说法', dayLabel(at(2026, 9, 13), now), '3 天前')
+  check('日名：一周外换成日期加星期', dayLabel(at(2026, 9, 1), now), '9月1日 周二')
+  check('日名：明天', dayLabel(at(2026, 9, 17), now), '明天')
+  check('日名：后天', dayLabel(at(2026, 9, 18), now), '后天')
 
   // 周期任务行尾：最近一次 + 连续天数
   check('打卡文案：今天 + 连续', recurringDoneLabel(rToday, now), '今天已打卡 · 连续 5 天')
@@ -1542,6 +1546,53 @@ console.log('\n--- done.ts（已完成这本账）---')
   check('打卡文案：前天', recurringDoneLabel(recurring({ lastDoneDay: '2026-09-14', streak: 0 }), now), '前天打卡')
   check('打卡文案：更早换日期', recurringDoneLabel(rOld, now), '上次 9月13日 · 连续 2 天')
   check('打卡文案：连着一天不给「连续」', recurringDoneLabel(recurring({ lastDoneDay: '2026-09-16', streak: 1 }), now), '今天已打卡')
+}
+
+console.log('\n--- future.ts（以后这本账）---')
+{
+  const now = at(2026, 9, 16, 16, 0) // 周三
+
+  const fTomorrowLate = deadline({ id: 'f-t-late', dueAt: at(2026, 9, 17, 17, 0) })
+  const fTomorrowEarly = deadline({ id: 'f-t-early', dueAt: at(2026, 9, 17, 9, 30) })
+  const fTomorrowAllDay = deadline({ id: 'f-t-allday', dueAt: at(2026, 9, 17), allDay: true })
+  const fTomorrowImportant = deadline({
+    id: 'f-t-imp', dueAt: at(2026, 9, 17), allDay: true, important: true
+  })
+  const fDayAfter = deadline({ id: 'f-dafter', dueAt: at(2026, 9, 18, 14, 0) })
+  const fNextMonth = deadline({ id: 'f-far', dueAt: at(2026, 10, 12, 10, 0) })
+  const today = deadline({ id: 'f-today', dueAt: at(2026, 9, 16, 18, 0) })
+  const overdue = deadline({ id: 'f-over', dueAt: at(2026, 9, 10, 10, 0) })
+  const done = deadline({ id: 'f-done', dueAt: at(2026, 9, 20, 10, 0), completedAt: now })
+  const removed = deadline({ id: 'f-gone', dueAt: at(2026, 9, 20, 10, 0), deletedAt: now })
+  const pool = someday({ id: 'f-pool' })
+  const every = recurring({ id: 'f-rec' })
+
+  const all = [
+    fTomorrowLate, fTomorrowEarly, fTomorrowAllDay, fTomorrowImportant,
+    fDayAfter, fNextMonth, today, overdue, done, removed, pool, every
+  ]
+  const days = collectUpcoming(all, now)
+
+  check('以后：按天分三段', days.map((d) => d.key).join(','), '2026-09-17,2026-09-18,2026-10-12')
+  check('以后：段名是相对日', dayLabel(days[0].dayStart, now), '明天')
+  check('以后：后天', dayLabel(days[1].dayStart, now), '后天')
+  check('以后：一周外换成日期加星期', dayLabel(days[2].dayStart, now), '10月12日 周一')
+  check('以后：今天的归看板，不进这里', days.some((d) => d.tasks.some((t) => t.id === 'f-today')), false)
+  check('以后：逾期的也不重复列', days.some((d) => d.tasks.some((t) => t.id === 'f-over')), false)
+  check('以后：做完的不进', days.some((d) => d.tasks.some((t) => t.id === 'f-done')), false)
+  check('以后：软删的不进', days.some((d) => d.tasks.some((t) => t.id === 'f-gone')), false)
+  check('以后：清单池不进', days.some((d) => d.tasks.some((t) => t.id === 'f-pool')), false)
+  check('以后：周期任务不进（它没有单个日期）',
+    days.some((d) => d.tasks.some((t) => t.id === 'f-rec')), false)
+
+  const t = days[0].tasks
+  check('同一天：有时刻的按时刻升序', t.map((x) => x.id).join(','), 'f-t-early,f-t-late,f-t-imp,f-t-allday')
+  check('同一天：全天型垫在最后', t[t.length - 1].allDay, true)
+  check('垫底那段里重要的在前', t[t.length - 2].id, 'f-t-imp')
+
+  check('以后：空账不分组', collectUpcoming([], now).length, 0)
+  // 底栏计数与分组必须同源 —— 两处各写一份过滤迟早只有一份是对的
+  check('upcomingCount 与分组一致', upcomingCount(all, now), t.length + 1 + 1)
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)

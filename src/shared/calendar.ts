@@ -130,6 +130,19 @@ export function relativeDayLabel(ts: number, now: number): string | null {
 }
 
 /**
+ * 分组标题用的日名：一周以内说相对话，一周以外换成「9月16日 周三」。
+ *
+ * 已完成那本账和「以后」那本账要的是同一件事 —— 给一天起个名。
+ * 两边各写一遍的话，「一周」这个界线迟早只有一边是对的。
+ */
+export function dayLabel(ts: number, now: number): string {
+  const rel = relativeDayLabel(ts, now)
+  if (rel !== null) return rel
+  const d = new Date(ts)
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAYS[d.getDay()]}`
+}
+
+/**
  * 下一个**严格晚于** today 的某个星期几（0 = 周日）。
  * 「下周一」不能理解成「本周还没过去的那个周一」—— 今天是周一的时候它得是 7 天后。
  */

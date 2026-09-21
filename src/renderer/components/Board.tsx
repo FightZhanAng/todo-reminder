@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type JSX } from 'react'
 import { CN_MONTHS } from '@shared/calendar'
 import { doneCount } from '@shared/done'
+import { upcomingCount } from '@shared/future'
 import { WEEKDAYS, formatClock } from '@shared/time'
 import { groupToday, type TodayGroups } from '@shared/group'
 import type { Task } from '@shared/types'
@@ -270,10 +271,11 @@ function MoonGlyph(): JSX.Element {
   )
 }
 
-/** 底栏：左侧两个账本入口（今天 / 已完成 / 收件箱），右侧提醒状态（规格 §6.1） */
+/** 底栏：左侧三个账本入口（收件箱 / 以后 / 已完成），右侧提醒状态（规格 §6.1） */
 function BottomBar({ state }: { state: AppState }): JSX.Element {
   const snapshot = state.snapshot!
   const inboxCount = snapshot.tasks.filter((t) => t.kind === 'someday' && t.deletedAt === null).length
+  const futureCount = upcomingCount(snapshot.tasks, state.now)
   const doneTotal = doneCount(snapshot.tasks)
   const paused = snapshot.runtime.pausedUntil
 
@@ -282,11 +284,14 @@ function BottomBar({ state }: { state: AppState }): JSX.Element {
 
   return (
     <footer className="bottombar">
-      {/* 两个入口都常驻显示，计数为 0 也不藏 —— 一个会消失的导航入口
+      {/* 三个入口都常驻显示，计数为 0 也不藏 —— 一个会消失的导航入口
           比一个「已完成 · 0 件」更难找 */}
       <div className="bottombar__links">
         <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'inbox' })}>
           收件箱 · {inboxCount} 件
+        </button>
+        <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'future' })}>
+          以后 · {futureCount} 件
         </button>
         <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'done' })}>
           已完成 · {doneTotal} 件

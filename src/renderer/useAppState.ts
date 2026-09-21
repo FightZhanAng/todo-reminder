@@ -10,6 +10,7 @@ export type View =
   | { name: 'board' }
   | { name: 'inbox' }
   | { name: 'done' }
+  | { name: 'future' }
   | { name: 'settings' }
   | { name: 'edit'; id: string | null; kind: TaskKind }
 

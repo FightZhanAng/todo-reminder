@@ -1,5 +1,6 @@
 import { useMemo, type JSX } from 'react'
-import { collectDone, doneDayLabel, recurringDoneLabel } from '@shared/done'
+import { dayLabel } from '@shared/calendar'
+import { collectDone, recurringDoneLabel } from '@shared/done'
 import { dayKey, formatClock } from '@shared/time'
 import { TaskRow } from './TaskRow'
 import type { AppState } from '../useAppState'
@@ -61,7 +62,7 @@ export function DoneView({ state }: { state: AppState }): JSX.Element {
             {ledger.days.map((day) => (
               <section className="section" key={day.key}>
                 <h2 className="section__label">
-                  <span className="section__name">{doneDayLabel(day.dayStart, now)}</span>
+                  <span className="section__name">{dayLabel(day.dayStart, now)}</span>
                   <span className="section__count">{day.tasks.length}</span>
                 </h2>
                 <ul>
