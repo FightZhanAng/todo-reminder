@@ -1,4 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { existsSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { applyCommand, type Command, type CommandResult, type TaskDraft } from '../shared/commands'
 import { IPC, type NoticeId, type Snapshot, type WindowAction } from '../shared/ipc'
 import type { NoticeCenter } from './notices'
@@ -120,9 +122,15 @@ export function registerIpc(ctx: AppContext): void {
       case 'hide':
         BrowserWindow.fromWebContents(e.sender)?.hide()
         return
-      case 'open-data-dir':
-        shell.showItemInFolder(ctx.store.dataFile)
+      case 'open-data-dir': {
+        // 数据文件损坏时它恰恰不在原位（坏文件已被改名），而
+        // `showItemInFolder` 对着不存在的路径会静默什么都不做 —— 于是那条
+        // 「打开所在文件夹」按钮正好在最需要它的时候是死的。先露备份文件，再退到目录。
+        const target = ctx.store.corruptBackupPath ?? ctx.store.dataFile
+        if (existsSync(target)) shell.showItemInFolder(target)
+        else void shell.openPath(dirname(target))
         return
+      }
       case 'quit':
         app.quit()
         return
