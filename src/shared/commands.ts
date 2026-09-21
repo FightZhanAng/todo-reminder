@@ -42,6 +42,7 @@ export type Command =
   | { type: 'task:create'; draft: TaskDraft }
   | { type: 'task:edit'; id: string; draft: TaskDraft }
   | { type: 'task:complete'; id: string }
+  | { type: 'task:uncomplete'; id: string }
   | { type: 'task:snooze'; id: string; minutes: number }
   | { type: 'task:postpone'; id: string }
   | { type: 'task:remove'; id: string }
@@ -185,6 +186,24 @@ function route(store: CommandStore, cmd: Command, now: number): CommandResult {
       if (!task) return notFound(cmd.id)
       if (task.kind === 'someday') return invalid('清单池的任务没有「完成」，只有「今天做」')
       store.updateTask(task.id, actionPatch(task, 'complete', now, opts(store)))
+      return { ok: true, touchedTaskId: task.id }
+    }
+
+    case 'task:uncomplete': {
+      const task = findTask(store, cmd.id)
+      if (!task) return notFound(cmd.id)
+      // 只有截止型有「取消完成」。周期任务的完成态是 `lastDoneDay` + `streak`，
+      // 而数据模型里**没有历史** —— 取消今天打卡只能把 lastDoneDay 清成 null，
+      // 那等于把连续天数一起抹掉，而且没法还原成「昨天」。宁可不做，
+      // 也不做一个会吃掉用户数据的动作。
+      if (task.kind !== 'deadline') return invalid('只有截止型任务能取消完成')
+      if (task.completedAt === null) return invalid('这条本来就没完成')
+
+      // **有意不动 `firedFor`**（与 task:restore 相反，那里的理由不适用在这里）：
+      // 取消完成并没有产生一个新的提醒点。一条已经弹过通知的逾期任务被取消完成
+      // 又清掉 firedFor 的话，`dueNow` 的幂等挡板会立刻失效，下一次 tick
+      // （10 秒后）就会为同一件事再弹一次 —— 用户只是点错了勾，不该被通知追着打。
+      store.updateTask(task.id, { completedAt: null })
       return { ok: true, touchedTaskId: task.id }
     }
 
