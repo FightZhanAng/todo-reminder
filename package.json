@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:core": "tsc -p tsconfig.test.json && node .tmp-test/scripts/core-test.js",
     "icons": "tsc -p tsconfig.test.json && node .tmp-test/scripts/make-icons.js",
-    "smoke": "electron scripts/smoke.cjs"
+    "smoke": "electron scripts/smoke.cjs",
+    "dist": "electron-vite build && node scripts/dist.mjs --win --publish never"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
@@ -27,16 +28,5 @@
     "typescript": "^5.9.3",
     "vite": "^8.2.0"
   },
-  "pnpm": { "onlyBuiltDependencies": ["electron", "electron-builder", "esbuild"] },
-  "build": {
-    "appId": "com.tomcato.todo-reminder",
-    "productName": "待办提醒",
-    "win": {
-      "icon": "resources/icon.ico",
-      "target": ["nsis"]
-    },
-    "nsis": {
-      "shortcutName": "待办提醒"
-    }
-  }
+  "pnpm": { "onlyBuiltDependencies": ["electron", "electron-builder", "esbuild"] }
 }

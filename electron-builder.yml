@@ -1,0 +1,40 @@
+appId: com.tomcato.todo-reminder
+productName: 待办提醒
+copyright: Copyright © 2026 tomcato
+
+directories:
+  buildResources: resources
+  output: release
+
+files:
+  - out/**/*
+  - package.json
+
+win:
+  # 用自己生成的多尺寸 .ico，不要喂 png 让它去转 —— electron-builder 内置的
+  # WASM 图标工具在内存受限环境下会直接把打包流程崩掉。ico 本身是代码画出来的
+  # （shared/appIcon.ts + pnpm icons），提交进仓库，打包机不必先跑一遍 node。
+  icon: resources/icon.ico
+  # 可执行文件名保持 ASCII：产品名是中文，但中文 exe 名在部分工具链和快捷方式
+  # 解析上会出问题。显示名交给 productName，通知里的署名交给 AUMID 的 DisplayName
+  executableName: todo-reminder
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # 托盘常驻工具不缺桌面入口，开始菜单那条才是 Windows 认这个 AUMID 的依据
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  shortcutName: 待办提醒
+  artifactName: todo-reminder-${version}-setup.${ext}
+
+portable:
+  artifactName: todo-reminder-${version}-portable.${ext}
