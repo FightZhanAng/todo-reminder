@@ -30,8 +30,8 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  # 托盘常驻工具不缺桌面入口，开始菜单那条才是 Windows 认这个 AUMID 的依据
-  createDesktopShortcut: false
+  # 开始菜单那条是 Windows 认这个 AUMID 的依据（通知归属要它），桌面这条是给人找得到的
+  createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: 待办提醒
   artifactName: todo-reminder-${version}-setup.${ext}
