@@ -125,6 +125,9 @@
    注册进 `HKCU\...\Run` 的是它（2026-09-21 实测：打包版登记的是
    `"...\release\win-unpacked\todo-reminder.exe"`，键名用 AUMID）。
    便携版（portable）自启不可信 —— 它跑在临时解压目录里。
+7. **安装包由 Actions 构建，不手工上传二进制。** `.github/workflows/release.yml`：打 `v*`
+   tag 就 `pnpm dist` + 发 Release。CI 上设 `DIST_OFFICIAL_MIRROR=1` 走官方源（镜像是给
+   这台开发机用的），并且**不跑 `pnpm smoke`** —— CI 没有桌面会话。
 
 ## 文件卫生
 

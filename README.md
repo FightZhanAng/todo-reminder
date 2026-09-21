@@ -62,7 +62,8 @@ Electron 会以 node 模式启动、`app.ready` 之前静默退出。结果落�
 
 ## 下载
 
-Releases 里有打包好的安装版：`todo-reminder-<版本>-setup.exe`（NSIS，per-user 安装）
+[Releases](https://github.com/FightZhanAng/todo-reminder/releases) 里有打包好的安装版，由 GitHub Actions 在打 tag 时自动构建
+（`.github/workflows/release.yml`）：`todo-reminder-<版本>-setup.exe`（NSIS，per-user 安装）
 与 `todo-reminder-<版本>-portable.exe`（便携版，双击即用，但开机自启别指望它 ——
 它跑在临时解压目录里）。
 

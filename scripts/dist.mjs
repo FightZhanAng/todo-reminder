@@ -26,17 +26,25 @@ const pkg = JSON.parse(readFileSync(packageFile, 'utf-8'))
 const binField = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin['electron-builder']
 const cli = join(dirname(packageFile), binField)
 
-const env = {
-  ...process.env,
+const env = { ...process.env }
+
+if (process.env.DIST_OFFICIAL_MIRROR) {
+  // GitHub Actions 之类的 CI 上直连 GitHub 是通的，不该再绕第三方镜像 ——
+  // 把两个变量清掉，让 electron-builder 用它自己的默认源。
+  delete env.ELECTRON_MIRROR
+  delete env.ELECTRON_BUILDER_BINARIES_MIRROR
+} else {
   // 镜像地址允许被外部环境变量覆盖，换网络环境时不用改代码
-  ELECTRON_BUILDER_BINARIES_MIRROR:
+  env.ELECTRON_BUILDER_BINARIES_MIRROR =
     process.env.ELECTRON_BUILDER_BINARIES_MIRROR ??
-    'https://npmmirror.com/mirrors/electron-builder-binaries/',
-  ELECTRON_MIRROR: process.env.ELECTRON_MIRROR ?? 'https://npmmirror.com/mirrors/electron/'
+    'https://npmmirror.com/mirrors/electron-builder-binaries/'
+  env.ELECTRON_MIRROR = process.env.ELECTRON_MIRROR ?? 'https://npmmirror.com/mirrors/electron/'
 }
 
 console.log(`[dist] 项目根    = ${ROOT}`)
-console.log(`[dist] 二进制镜像 = ${env.ELECTRON_BUILDER_BINARIES_MIRROR}`)
+console.log(
+  `[dist] 二进制源  = ${env.ELECTRON_BUILDER_BINARIES_MIRROR ?? 'electron-builder 默认（GitHub）'}`
+)
 
 const child = spawn(process.execPath, [cli, ...process.argv.slice(2)], {
   cwd: ROOT,

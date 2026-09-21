@@ -1,0 +1,56 @@
+name: 出安装包
+
+# 打 tag（v*）就构建 Windows 安装包并发一条 Release；也可以手动触发只构建不发版。
+# 界面冒烟（pnpm smoke）要真开 Electron 窗口，CI 上没有桌面会话，所以这里不跑。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 验证
+        run: pnpm typecheck && pnpm test:core
+        shell: bash
+
+      - name: 打包
+        # DIST_OFFICIAL_MIRROR=1：CI 上直连 GitHub 是通的，不走 npmmirror（那是给本机用的）
+        run: pnpm dist
+        env:
+          DIST_OFFICIAL_MIRROR: '1'
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/todo-reminder-*.exe
+          if-no-files-found: error
+
+      - name: 发 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" >/dev/null 2>&1 ||
+            gh release create "$tag" --title "$tag" \
+              --notes "Windows 安装包。setup 是 per-user NSIS 安装版；portable 双击即用，但开机自启别用它（它跑在临时解压目录里）。"
+          gh release upload "$tag" release/todo-reminder-*.exe --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
