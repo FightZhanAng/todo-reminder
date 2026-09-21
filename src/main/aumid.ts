@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /**
  * Windows 上 toast 通知靠 AppUserModelID 归属。光调
@@ -14,11 +17,51 @@ import { execFileSync } from 'node:child_process'
  *
  * 只写 HKCU，不需要管理员权限。
  *
- * DisplayName 有意用 ASCII：中文注册表值走命令行参数会被控制台代码页吃掉，
- * 要写中文得走 UTF-16LE 的 .reg 文件 + reg import，或者 Python 的 winreg。
- * 本项目的应用名是「待办提醒」，要显示中文得单独处理这一步。
+ * `DisplayName` 就是通知右上角那个署名，要跟产品名一致（「待办提醒」）。
  */
 const ACTIVATOR_LABEL = 'Electron Notification Activator'
+
+const AUMID_KEY_ROOT = 'Software\\Classes\\AppUserModelId'
+
+function hkcuAumidKey(aumid: string): string {
+  return `HKCU\\${AUMID_KEY_ROOT}\\${aumid}`
+}
+
+function fullAumidKey(aumid: string): string {
+  return `HKEY_CURRENT_USER\\${AUMID_KEY_ROOT}\\${aumid}`
+}
+
+/** .reg 文件里的字符串：反斜杠和引号都要逃 */
+function regString(s: string): string {
+  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+/**
+ * DisplayName 走 `.reg` 文件 + `reg import`，不走 `reg add` 的命令行参数 ——
+ * 中文经过程序参数会被控制台代码页吃掉，落到注册表里是一串乱码，
+ * 通知上就署名成「寰呭姏鎻愰」这种。`reg import` 读文件时按 UTF-16LE + BOM
+ * 解码，中文才立得住。
+ */
+function importDisplayNames(aumid: string, displayName: string): void {
+  const dir = mkdtempSync(join(tmpdir(), 'aumid-'))
+  const file = join(dir, 'aumid.reg')
+  const body = [
+    'Windows Registry Editor Version 5.00',
+    '',
+    `[${fullAumidKey(aumid)}]`,
+    `${regString('DisplayName')}=${regString(displayName)}`,
+    ''
+  ].join('\r\n')
+  try {
+    writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(body, 'utf16le')]))
+    execFileSync('reg.exe', ['import', file], { stdio: 'ignore', windowsHide: true })
+  } catch (err) {
+    // 同 write()：写不进去只影响署名，不该让应用起不来
+    console.error('[aumid] reg import 失败：', aumid, err)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
 
 /**
  * 反查 Electron 自己注册的激活器 GUID。**不要自造 GUID** ——
@@ -26,33 +69,33 @@ const ACTIVATOR_LABEL = 'Electron Notification Activator'
  * 按 `LocalServer32` 冷启动一个裸 exe，屏幕上弹出标题为「Electron」的欢迎页，
  * 而正在跑的进程收不到任何事件。
  *
- * 做法：先在 CLSID 树下按默认值搜 label 找到候选键，再逐个比对 LocalServer32。
- * 只剩一个候选就直接用；出现多个（同机有多个 Electron 应用的 exe 路径相同时
- * 理论上可能）时取第一个 —— 已知局限，真出问题再收紧。
+ * **搜索方向必须是「拿 exe 路径去问 reg」，不能是「把整棵树捞出来自己比」**：
+ * reg.exe 往 stdout 写的是控制台代码页（本机 GBK），Node 按 utf8 解出来中文
+ * 全是乱码，于是 `line.includes(process.execPath)` 对任何带中文的路径永远不成立
+ * —— 本机项目就在「我的工作台」下，实测 11 个候选一个都比不中，
+ * CustomActivator 从来没被自动写上过一次。改成让 reg 自己做匹配
+ * （它拿到的是 CreateProcess 传过去的 UTF-16 参数，比较是准的），
+ * 我们只从输出里取**键名** —— GUID 和 CLSID 前缀是纯 ASCII，不受代码页影响。
+ * 再用默认值是不是那句 label 过一道筛（label 也是纯 ASCII，比较可靠）。
  *
  * **缓存策略**：成功扫到过一次就缓存下来，之后不再扫整棵 CLSID 树。
  * - 未扫过 / 上次没扫到：保持 undefined，下次调用继续重试；
  * - 扫到：存成字符串，之后直接返回，避免每次要发通知前都跑一次
- *   `reg query /s` 全树扫描（同步执行，会把主进程卡住）；
+ *   `reg query /s` 全树扫描（同步执行约 80ms，会把主进程卡住）；
  * - 失败的返回值（null）**绝不缓存** —— 否则会卡死在「再也不重试」，
  *   错过 Electron 稍后写下自己 CLSID 键的时机。这正是「启动时没扫到、
  *   `show()` 前再扫一次」兜底能成立的前提：失败时永远保留重试能力。
- *
- * 代价要知情：只要一直扫不到，每次出通知前都会同步跑一次全树扫描。
- * 这是刻意选的 —— 扫不到的窗口期通常只出现在刚启动那一小会儿。
  */
 let cachedActivatorClsid: string | undefined = undefined
 
 function findElectronActivatorClsid(): string | null {
   if (cachedActivatorClsid !== undefined) return cachedActivatorClsid
 
-  const exe = process.execPath
-
   let stdout: string
   try {
     stdout = execFileSync(
       'reg.exe',
-      ['query', 'HKCU\\Software\\Classes\\CLSID', '/s', '/f', ACTIVATOR_LABEL, '/d'],
+      ['query', 'HKCU\\Software\\Classes\\CLSID', '/s', '/f', process.execPath, '/d'],
       { encoding: 'utf8', windowsHide: true }
     )
   } catch {
@@ -60,20 +103,20 @@ function findElectronActivatorClsid(): string | null {
     return null
   }
 
+  // 命中的通常是 ...\CLSID\{guid}\LocalServer32，取到 {guid} 那一层就截断
   const keys = stdout.match(/HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\\{[0-9A-Fa-f-]{36}\}/g) ?? []
   for (const key of new Set(keys)) {
     try {
-      const line = execFileSync('reg.exe', ['query', `${key}\\LocalServer32`, '/ve'], {
+      const line = execFileSync('reg.exe', ['query', key, '/ve'], {
         encoding: 'utf8',
         windowsHide: true
       })
-      // 取值行的最后一段就是数据；带引号的路径要去引号
-      if (line.includes(exe)) {
+      if (line.includes(ACTIVATOR_LABEL)) {
         cachedActivatorClsid = key.slice(key.lastIndexOf('\\') + 1)
         return cachedActivatorClsid
       }
     } catch {
-      /* 没有 LocalServer32 子键，跳过 */
+      /* 读不到默认值，跳过 */
     }
   }
   return null
@@ -100,9 +143,10 @@ function write(key: string, args: string[]): void {
 export function ensureAumidRegistered(aumid: string, displayName: string): boolean {
   if (process.platform !== 'win32') return false
 
-  const aumidKey = `HKCU\\Software\\Classes\\AppUserModelId\\${aumid}`
-  write(aumidKey, ['/v', 'DisplayName', '/t', 'REG_SZ', '/d', displayName, '/f'])
-  write(aumidKey, ['/v', 'HasSentNotification', '/t', 'REG_DWORD', '/d', '1', '/f'])
+  importDisplayNames(aumid, displayName)
+  write(hkcuAumidKey(aumid), [
+    '/v', 'HasSentNotification', '/t', 'REG_DWORD', '/d', '1', '/f'
+  ])
   return ensureAumidActivator(aumid)
 }
 
@@ -117,7 +161,7 @@ export function ensureAumidActivator(aumid: string): boolean {
   const clsid = findElectronActivatorClsid()
   if (!clsid) return false
 
-  write(`HKCU\\Software\\Classes\\AppUserModelId\\${aumid}`, [
+  write(hkcuAumidKey(aumid), [
     '/v', 'CustomActivator', '/t', 'REG_SZ', '/d', clsid, '/f'
   ])
   return true

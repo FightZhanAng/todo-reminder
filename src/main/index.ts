@@ -29,6 +29,8 @@ import { TrayController } from './tray'
  * 两边的 AUMID 必须不同。
  */
 const APP_NAME = 'todo-reminder'
+/** 通知右上角的署名，与 electron-builder.yml 的 productName 保持一致 */
+const DISPLAY_NAME = '待办提醒'
 const DEV_AUMID = 'com.tomcato.todo-reminder.dev'
 const PROD_AUMID = 'com.tomcato.todo-reminder'
 
@@ -43,7 +45,7 @@ app.setAppUserModelId(AUMID)
 // 光有 AUMID 不够 —— 见修正表第 11 条：必须补上 Electron 不写的注册表键，
 // 否则通知完全不弹（实测）。安装版有 NSIS 建的开始菜单快捷方式兜底，
 // 但重复写一遍无害且幂等，所以不做 if (app.isPackaged) 分支。
-ensureAumidRegistered(AUMID, APP_NAME)
+ensureAumidRegistered(AUMID, DISPLAY_NAME)
 
 let mainWindow: BrowserWindow | null = null
 let store: Store
@@ -148,6 +150,12 @@ if (!app.requestSingleInstanceLock()) {
         // 每 tick 都走廉价短路。这样窗口期内点击也不会冷启动裸 electron.exe。
         ensureAumidActivator(AUMID)
         notifier.showBatch(batch)
+        // show() 之后再扫一次，这条是给**装完之后第一条通知**准备的：
+        // 实测 Electron 只在第一次真走 toast 通道时才往 HKCU\...\CLSID 里写下
+        // 自己的激活器键，于是上面那次扫描在首条通知上必然扑空、缓存也建不起来，
+        // 结果是装好之后头几次点击都退化成冷启动 exe。扫描一次约 80ms，
+        // 且成功之后缓存短路，不会再有第二次开销。
+        ensureAumidActivator(AUMID)
         tray.refresh()
         // 回填 firedFor：通知真弹出去之后才标，否则同批任务每 TICK_MS 重弹一次
         scheduler.markFired([...batch.fresh, ...batch.missed])
