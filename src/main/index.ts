@@ -2,10 +2,10 @@ import { app, BrowserWindow, powerMonitor } from 'electron'
 import { join } from 'node:path'
 import { ensureAumidActivator, ensureAumidRegistered } from './aumid'
 import { windowIconPath } from './icons'
-import { broadcast, registerIpc, type AppContext } from './ipc'
+import { broadcast, registerIpc, runCommand, type AppContext } from './ipc'
 import type { Command, CommandResult } from '../shared/commands'
 import { isValidHotkey } from '../shared/hotkey'
-import { IPC, type OpenView } from '../shared/ipc'
+import { IPC, type Notice, type OpenView } from '../shared/ipc'
 import { NoticeCenter } from './notices'
 import { Notifier } from './notifier'
 import { createQuickAdd, type QuickAdd } from './quickadd'
@@ -159,11 +159,18 @@ if (!app.requestSingleInstanceLock()) {
 
     quickAdd = createQuickAdd()
 
+    const raiseNotice = (notice: Notice): void => {
+      notices.raise(notice)
+      broadcast(ctx)
+    }
+
     notifier = new Notifier({
       store,
-      scheduler,
+      // 通知上的三个按钮与界面走同一条命令层：tick、托盘刷新、广播都在里面
+      runCommand: (cmd) => void runCommand(ctx, cmd),
       // 点通知要落到**具体那一条**上：只把窗口唤起来，用户还得自己在列表里找
-      onFocusTask: (taskId) => openMain(null, taskId)
+      onFocusTask: (taskId) => openMain(null, taskId),
+      raiseNotice
     })
 
     tray = new TrayController({

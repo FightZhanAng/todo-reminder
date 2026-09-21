@@ -1,17 +1,26 @@
 import { Notification } from 'electron'
-import { ACTION_ORDER, actionLabel, actionPatch, type TaskAction } from '../shared/actions'
+import { ACTION_ORDER, actionLabel, type TaskAction } from '../shared/actions'
+import type { Command } from '../shared/commands'
+import type { Notice } from '../shared/ipc'
 import { describeTask, missedSummary } from '../shared/notifyText'
 import type { RemindableTask } from '../shared/types'
-import type { NotifyBatch, Scheduler } from './scheduler'
+import type { NotifyBatch } from './scheduler'
 import type { Store } from './store'
 
 const MISSED_MAX_TITLES = 3
 
 export interface NotifierDeps {
   store: Store
-  scheduler: Scheduler
-  /** 点击通知正文时唤起主窗口并聚焦到某个任务 */
+  /**
+   * 动作走命令层 —— 保证「通知改的数据」与「界面改的数据」是同一条路。
+   * 直接写 store 会漏掉 tick + 托盘刷新 + 广播，症状是「通知点完完成，
+   * 主窗口还挂着那条任务，托盘件数也不变」。
+   */
+  runCommand: (cmd: Command) => void
+  /** 点通知正文 / 「打开待办」 → 唤起窗口并聚焦 */
   onFocusTask: (taskId: string) => void
+  /** 通知发不出去时的反馈渠道（只 console.error 的话，用户永远看不到） */
+  raiseNotice: (notice: Notice) => void
 }
 
 /**
@@ -58,7 +67,14 @@ export class Notifier {
       if (action) this.applyAction(task.id, action)
     })
     n.on('click', () => this.deps.onFocusTask(task.id))
-    n.on('failed', (_e, err) => console.error('[notifier] 通知失败：', err))
+    n.on('failed', (_e, err) => {
+      this.deps.raiseNotice({
+        id: 'notify-failed',
+        level: 'warn',
+        text: `系统通知发送失败：${err}。检查「专注助手」或系统通知设置。`,
+        at: Date.now()
+      })
+    })
     n.show()
   }
 
@@ -76,7 +92,14 @@ export class Notifier {
     })
     n.on('action', () => this.deps.onFocusTask(first.task.id))
     n.on('click', () => this.deps.onFocusTask(first.task.id))
-    n.on('failed', (_e, err) => console.error('[notifier] 聚合通知失败：', err))
+    n.on('failed', (_e, err) => {
+      this.deps.raiseNotice({
+        id: 'notify-failed',
+        level: 'warn',
+        text: `聚合通知发送失败：${err}。检查「专注助手」或系统通知设置。`,
+        at: Date.now()
+      })
+    })
     n.show()
   }
 
@@ -84,12 +107,14 @@ export class Notifier {
     const task = this.deps.store.tasks.find((t) => t.id === taskId)
     if (!task || task.kind === 'someday') return
 
-    // actionPatch 对同一个 now 幂等，按钮动作本身不可做累加式写法
-    const patch = actionPatch(task, action, Date.now(), {
-      snoozeMinutes: this.deps.store.settings.snoozeMinutes
-    })
-    this.deps.store.updateTask(taskId, patch)
-    // 立刻重算一次，让刚被推迟/完成的任务马上影响下一轮
-    this.deps.scheduler.tick()
+    // 复用命令层的语义映射。actionPatch 对同一个 now 幂等，
+    // 所以「一次点击可能触发两次 action」（实测相隔 ~31ms）不会累加
+    const cmd: Command =
+      action === 'complete'
+        ? { type: 'task:complete', id: taskId }
+        : action === 'snooze'
+          ? { type: 'task:snooze', id: taskId, minutes: this.deps.store.settings.snoozeMinutes }
+          : { type: 'task:postpone', id: taskId }
+    this.deps.runCommand(cmd)
   }
 }
