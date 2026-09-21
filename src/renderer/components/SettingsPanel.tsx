@@ -221,6 +221,20 @@ export function SettingsPanel({ state }: { state: AppState }): JSX.Element {
         </div>
 
         <div className="field">
+          <span className="field__label">窗口置顶</span>
+          <span className="field__control">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={s.alwaysOnTop}
+                onChange={(e) => patch({ alwaysOnTop: e.target.checked })}
+              />
+              让主窗口浮在所有窗口前面
+            </label>
+          </span>
+        </div>
+
+        <div className="field">
           <span className="field__label">开机启动</span>
           <span className="field__control">
             <label className="check">

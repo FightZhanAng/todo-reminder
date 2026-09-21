@@ -74,6 +74,7 @@ function showMainWindow(): void {
     minHeight: 480,
     show: false,
     autoHideMenuBar: true,
+    alwaysOnTop: store.settings.alwaysOnTop,
     // 不给的话开发态任务栏上是 Electron 的默认原子图标；打包后走 exe 内嵌图标
     ...(icon === null ? {} : { icon }),
     webPreferences: {
@@ -208,6 +209,11 @@ if (!app.requestSingleInstanceLock()) {
         tray.refresh()
         if (cmd.type !== 'settings:patch') return
         if (cmd.patch.theme !== undefined) applyTheme(store.settings.theme)
+        if (cmd.patch.alwaysOnTop !== undefined) {
+          // 窗口可能还没建（藏在托盘里）—— 那种情况下 openMain 会读设置建对，
+          // 这里只管已经存在的那个
+          mainWindow?.setAlwaysOnTop(store.settings.alwaysOnTop)
+        }
         if (cmd.patch.launchAtLogin !== undefined) {
           app.setLoginItemSettings({
             openAtLogin: store.settings.launchAtLogin,

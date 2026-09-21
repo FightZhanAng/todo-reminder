@@ -99,6 +99,8 @@ export interface Settings {
   /** 全局快捷键（快速添加小窗） */
   hotkey: string
   theme: 'auto' | 'light' | 'dark'
+  /** 主窗口浮在所有窗口之上 —— 托盘常驻时怕它被别的窗口压住 */
+  alwaysOnTop: boolean
 }
 
 export interface Persisted {

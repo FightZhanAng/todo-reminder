@@ -530,6 +530,7 @@ async function mainWindowPass() {
   await sleep(300)
   const settings = await evalIn(win, `(() => ({
     groups: [...document.querySelectorAll('.group__label')].map(e => e.textContent),
+    labels: [...document.querySelectorAll('.field__label')].map(e => e.textContent),
     checks: document.querySelectorAll('.check').length,
     hotkey: (document.querySelector('.field--stack input.mono') || {}).value,
     hint: (document.querySelector('.field--stack .field__hint') || {}).textContent,
@@ -539,15 +540,16 @@ async function mainWindowPass() {
   }))()`)
   ok('设置页五个分组都在', settings.groups.join('/') === '提醒/免打扰/外观与启动/随手记/数据', settings.groups)
   ok('设置页复选框都渲染了', settings.checks >= 5, settings.checks)
+  ok('设置页有「窗口置顶」这一格', settings.labels.includes('窗口置顶'), settings.labels)
   ok('快捷键读的是 settings.hotkey', settings.hotkey === 'Control+Alt+T', settings.hotkey)
   ok('快捷键状态文案跟着 runtime 走', /注册上了|小窗/.test(settings.hint || ''), settings.hint)
   ok('设置页的时刻也换成了自绘控件（全天 + 免打扰起止）', settings.timeFields === 3 && settings.nativeTime === 0, settings)
   ok('设置页内容比视口长（能滚）', settings.bodyOverflow === true, settings.bodyOverflow)
 
-  // 编辑器：从看板点 +（**注意是 .iconbutton--solid** —— 顶栏第一个是主题开关）
+  // 编辑器：从看板点「+ 记一件」（底栏上方那个实心块；顶栏那两个是主题与设置）
   win.webContents.send('todo:open-view', 'board')
   await sleep(200)
-  await evalIn(win, `document.querySelector('.head__actions .iconbutton--solid').click(), 'ok'`)
+  await evalIn(win, `document.querySelector('.addbar__button').click(), 'ok'`)
   await sleep(300)
   const editor = await evalIn(win, `(() => ({
     title: (document.querySelector('.topbar__title') || {}).textContent,

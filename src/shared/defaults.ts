@@ -23,5 +23,6 @@ export const DEFAULT_SETTINGS: Settings = {
   quietWhenIdle: true,
   idleThresholdMin: 5,
   hotkey: 'Control+Alt+T',
-  theme: 'auto'
+  theme: 'auto',
+  alwaysOnTop: false
 }

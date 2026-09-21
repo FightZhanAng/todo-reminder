@@ -634,6 +634,7 @@ console.log('\n--- 承重常量（静默改值 typecheck 抓不到）---')
   check('默认空闲免打扰开', DEFAULT_SETTINGS.quietWhenIdle, true)
   check('默认空闲阈值 5 分钟', DEFAULT_SETTINGS.idleThresholdMin, 5)
   check('默认主题 auto', DEFAULT_SETTINGS.theme, 'auto')
+  check('默认不置顶窗口', DEFAULT_SETTINGS.alwaysOnTop, false)
   check('默认快捷键 Control+Alt+T', DEFAULT_SETTINGS.hotkey, 'Control+Alt+T')
 }
 
