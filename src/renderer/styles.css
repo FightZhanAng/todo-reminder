@@ -795,11 +795,15 @@ body,
   color: var(--ink);
 }
 
+/* 操作提示气泡。bottom 不是随手挑的：它要越过底栏（约 42px）**和**底栏上方那块
+   「+ 记一件」（上下边距 4/2 + 按钮 30 = 36px），再加 6px 气口。
+   0.1.2 真人验收时它就压在记一件上过 —— 改这两块高度时一起看这条，
+   scripts/smoke.cjs 里「气泡不压住记一件」那条会替你量着。 */
 .flash {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 42px;
+  bottom: 84px;
   display: flex;
   justify-content: center;
   pointer-events: none;

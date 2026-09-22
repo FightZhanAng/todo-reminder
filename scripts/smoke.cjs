@@ -508,6 +508,25 @@ async function mainWindowPass() {
   ok('取消完成时给一句「已收回今天」',
     (await evalIn(win, `(document.querySelector('.flash__inner') || {}).textContent || null`)) === '已收回今天')
 
+  // 0.1.2 真人验收发现的：操作提示气泡压在「+ 记一件」上。气泡是按 bottom 绝对定位的，
+  // 记一件是后来插在底栏上方那一块 —— 两个都会说话就叠在一起。切回看板量一次：
+  // 气泡还在 2.5 秒存活期内，而这正是真实里最常见的时机（在已完成点完勾回看板）。
+  win.webContents.send('todo:open-view', 'board')
+  await sleep(150)
+  const clash = await evalIn(win, `(() => {
+    const f = document.querySelector('.flash'), b = document.querySelector('.addbar__button')
+    if (!f || !b) return null
+    const a = f.getBoundingClientRect(), c = b.getBoundingClientRect()
+    return { flashBottom: Math.round(a.bottom), btnTop: Math.round(c.top) }
+  })()`)
+  ok('切回看板时气泡还挂着（2.5 秒没到）', clash !== null, clash)
+  ok('操作提示气泡不压住「+ 记一件」',
+    clash !== null && clash.flashBottom <= clash.btnTop, clash)
+
+  // 回已完成 —— 下面几步是在那本账里点的
+  await evalIn(win, `(document.querySelectorAll('.bottombar__link')[2].click(), 'ok')`)
+  await sleep(200)
+
   // 行内菜单第一项也要跟着变成「取消完成」。
   // 先等 520ms 的退场走完 —— 退场行的 pointer-events 是 none，而我们要点的
   // 恰好是刚被取消完成的那一行
