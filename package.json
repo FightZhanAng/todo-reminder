@@ -1,6 +1,6 @@
 {
   "name": "todo-reminder",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "桌面待办提醒 —— 通知直接办、今日与以后分开、错过的必须补上",
   "author": "tomcato",
