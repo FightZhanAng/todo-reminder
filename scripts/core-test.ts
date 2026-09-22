@@ -34,6 +34,7 @@ import { dueNow, isRemindable, remindAtOf } from '../src/shared/remind'
 import { groupMissed, groupToday } from '../src/shared/group'
 import { inQuietHours } from '../src/shared/quiet'
 import { ACTION_ORDER, actionLabel, actionPatch } from '../src/shared/actions'
+import { missedTag, parseActivation, taskTag } from '../src/shared/activation'
 import { describeTask, missedSummary } from '../src/shared/notifyText'
 import {
   TRAY_ICON_SCALE,
@@ -1594,6 +1595,68 @@ console.log('\n--- future.ts（以后这本账）---')
   check('以后：空账不分组', collectUpcoming([], now).length, 0)
   // 底栏计数与分组必须同源 —— 两处各写一份过滤迟早只有一份是对的
   check('upcomingCount 与分组一致', upcomingCount(all, now), t.length + 1 + 1)
+}
+
+// ── 通知激活（Windows 的点击只走 handleActivation，见 shared/activation.ts）──────
+{
+  const id = '97fbbb4e-a7ba-4c6f-bf72-05ed1cafbdd3'
+  const at = 1789982220000
+
+  check('标签：task 用冒号分段', taskTag(id, at), `task:${id}:${at}`)
+  check('标签：missed 同理', missedTag(id, at), `missed:${id}:${at}`)
+
+  // check 是 === 比较，对象一律先序列化再比
+  const shape = (v: unknown): string => JSON.stringify(v)
+  const act = (i: number, tag = taskTag(id, at)) =>
+    parseActivation({ type: 'action', actionIndex: i, arguments: `type=action&action=${i}&tag=${tag}` })
+
+  check('激活：第 0 颗按钮是完成', shape(act(0)), shape({ kind: 'action', taskId: id, action: 'complete' }))
+  check('激活：第 1 颗是推迟', shape(act(1)), shape({ kind: 'action', taskId: id, action: 'snooze' }))
+  check('激活：第 2 颗是推到明天', shape(act(2)), shape({ kind: 'action', taskId: id, action: 'tomorrow' }))
+  const dashed = act(0)
+  check('激活：UUID 里的连字符没把 id 切坏', dashed.kind === 'action' && dashed.taskId, id)
+
+  check(
+    '激活：点正文只唤起窗口',
+    shape(parseActivation({ type: 'click', arguments: `type=click&tag=${taskTag(id, at)}` })),
+    shape({ kind: 'open', taskId: id })
+  )
+  check(
+    '激活：tag 被 URL 编码过也能认',
+    shape(
+      parseActivation({
+        type: 'click',
+        arguments: `type=click&tag=${encodeURIComponent(taskTag(id, at))}`
+      })
+    ),
+    shape({ kind: 'open', taskId: id })
+  )
+
+  // 聚合通知只有一颗「打开待办」，它与任务通知的「完成」同为下标 0 ——
+  // 按 ACTION_ORDER 解释它的话，点「打开待办」会把第一条任务直接勾掉
+  check(
+    '激活：聚合通知的按钮是打开，不是完成',
+    shape(
+      parseActivation({
+        type: 'action',
+        actionIndex: 0,
+        arguments: `type=action&action=0&tag=${missedTag(id, at)}`
+      })
+    ),
+    shape({ kind: 'open', taskId: id })
+  )
+
+  check('激活：下标越界退回打开窗口', shape(act(7)), shape({ kind: 'open', taskId: id }))
+  check(
+    '激活：不认识的 tag 什么都不做',
+    shape(parseActivation({ type: 'action', actionIndex: 0, arguments: 'type=action&action=0&tag=other' })),
+    shape({ kind: 'unknown' })
+  )
+  check(
+    '激活：arguments 缺 tag 也不炸',
+    shape(parseActivation({ type: 'click', arguments: 'type=click' })),
+    shape({ kind: 'unknown' })
+  )
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)
