@@ -1,6 +1,7 @@
-import { app, BrowserWindow, powerMonitor } from 'electron'
+import { app, BrowserWindow, powerMonitor, shell } from 'electron'
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { ensureAumidActivator, ensureAumidRegistered } from './aumid'
+import { ensureAumidRegistered, writeAumidActivator } from './aumid'
 import { windowIconPath } from './icons'
 import { broadcast, registerIpc, runCommand, type AppContext } from './ipc'
 import type { Command, CommandResult } from '../shared/commands'
@@ -46,6 +47,68 @@ app.setAppUserModelId(AUMID)
 // 否则通知完全不弹（实测）。安装版有 NSIS 建的开始菜单快捷方式兜底，
 // 但重复写一遍无害且幂等，所以不做 if (app.isPackaged) 分支。
 ensureAumidRegistered(AUMID, DISPLAY_NAME)
+
+/**
+ * `CustomActivator` 该指哪个 GUID。
+ *
+ * 结论是**不钉死**：必须是 Electron 这次运行时真正注册的那个，理由见
+ * `aumid.ts` 的 `writeAumidActivator`。这里只负责把它读出来，读两个地方，
+ * **快捷方式优先**：
+ *
+ * 1. 开始菜单里那条属于本 AUMID 的快捷方式上的
+ *    `System.AppUserModel.ToastActivatorCLSID`。Electron 注册时若看见它，就会
+ *    改用这个值（`EnsureShortcut()` 里的 `SetAppToastActivatorCLSID`），所以它才
+ *    是最终值 —— 而 `app.toastActivatorCLSID` 在那之前读到的还是 Electron 自己
+ *    准备用的值，两者在「首次注册之前」并不相同，必须先看快捷方式。
+ * 2. `app.toastActivatorCLSID`：没有快捷方式时，Electron 就是拿这个值去建
+ *    快捷方式并注册的，也就是最终值。
+ *
+ * 读快捷方式而不是去注册表反查 CLSID 键，是因为键会攒（每次重装、每次随机
+ * GUID 都留一条指向同一个 exe 的陈旧键），挑中哪条全看运气；快捷方式只有一条，
+ * 而且按 AUMID 认人，是准的。
+ */
+function shortcutActivatorClsid(): string | null {
+  try {
+    const dir = join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')
+    for (const name of readdirSync(dir)) {
+      if (!name.toLowerCase().endsWith('.lnk')) continue
+      try {
+        const details = shell.readShortcutLink(join(dir, name))
+        if (details.appUserModelId === AUMID && details.toastActivatorClsid) {
+          return details.toastActivatorClsid
+        }
+      } catch {
+        // 单条读不了（坏文件/不是快捷方式）不该拖垮整轮
+      }
+    }
+  } catch {
+    // 目录读不到（权限、路径变化）就当没有快捷方式，退回 app 的值
+  }
+  return null
+}
+
+/** 已经写进注册表的那个值，省掉「值没变还去写一遍注册表」 */
+let activatorClsid: string | null = null
+
+/**
+ * 把 `CustomActivator` 对齐到 Electron 实际注册的 GUID。启动时先来一次，
+ * 之后每次弹通知前后各跟一次 —— 首条通知那一刻 Electron 才会跑它自己的注册
+ * （`RegisterActivator` 在后台线程里建快捷方式、写 CLSID 键、注册 COM 类对象），
+ * 后面那一次就是把「注册之后才定下来的值」补上。写一次注册表很便宜，
+ * 只有值真的变了才写。
+ */
+function syncToastActivator(): void {
+  if (process.platform !== 'win32') return
+  let clsid: string
+  try {
+    clsid = shortcutActivatorClsid() ?? app.toastActivatorCLSID
+  } catch {
+    // app.toastActivatorCLSID 读不到（老版本 / 非 win32）就不动它
+    return
+  }
+  if (!clsid || clsid === activatorClsid) return
+  if (writeAumidActivator(AUMID, clsid)) activatorClsid = clsid
+}
 
 let mainWindow: BrowserWindow | null = null
 let store: Store
@@ -135,6 +198,10 @@ if (!app.requestSingleInstanceLock()) {
     // 主题在启动时先对齐一次 —— 设置有可能被改在别处
     applyTheme(store.settings.theme)
 
+    // 通知能不能点回来，全看 `CustomActivator` 与 Electron 注册的那个 GUID
+    // 是否一致。启动先把上一次运行留下的值校正过来。
+    syncToastActivator()
+
     app.setLoginItemSettings({
       openAtLogin: store.settings.launchAtLogin,
       path: process.execPath
@@ -145,18 +212,12 @@ if (!app.requestSingleInstanceLock()) {
       isIdle: () =>
         powerMonitor.getSystemIdleTime() >= store.settings.idleThresholdMin * 60,
       notify: (batch) => {
-        // show() 前再扫一次 AUMID 激活器：Electron 何时写下自己的 CLSID 键
-        // 没实测过，可能晚于启动时的 ensureAumidRegistered。扫不到就不写，
-        // 留待下次 tick 重试（aumid.ts 里失败不缓存）；扫到则缓存、后续
-        // 每 tick 都走廉价短路。这样窗口期内点击也不会冷启动裸 electron.exe。
-        ensureAumidActivator(AUMID)
+        // 首条通知这一刻 Electron 才真去注册（建快捷方式 + 写 CLSID 键 + 注册
+        // COM 类对象，都在后台线程），所以前后各对齐一次，别让 `CustomActivator`
+        // 落在一个没有活实例的 GUID 上 —— 那样点「完成」是什么都不会发生的
+        syncToastActivator()
         notifier.showBatch(batch)
-        // show() 之后再扫一次，这条是给**装完之后第一条通知**准备的：
-        // 实测 Electron 只在第一次真走 toast 通道时才往 HKCU\...\CLSID 里写下
-        // 自己的激活器键，于是上面那次扫描在首条通知上必然扑空、缓存也建不起来，
-        // 结果是装好之后头几次点击都退化成冷启动 exe。扫描一次约 80ms，
-        // 且成功之后缓存短路，不会再有第二次开销。
-        ensureAumidActivator(AUMID)
+        syncToastActivator()
         tray.refresh()
         // 回填 firedFor：通知真弹出去之后才标，否则同批任务每 TICK_MS 重弹一次
         scheduler.markFired([...batch.fresh, ...batch.missed])

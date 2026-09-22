@@ -47,15 +47,23 @@ Electron 会以 node 模式启动、`app.ready` 之前静默退出。结果落�
 
 逐条验收清单、以及「哪些是真机跑过的、哪些只有自动化覆盖」记在 `scripts/manual-check.md`。
 
-## Windows 通知这块有三个坑（都踩过）
+## Windows 通知这块有四个坑（都踩过）
 
 1. 光调 `app.setAppUserModelId()` 通知根本不弹。还得有开始菜单快捷方式（NSIS 建的那条），
    以及 `HKCU\Software\Classes\AppUserModelId\<AUMID>` 下的 `DisplayName` / `HasSentNotification`
    / `CustomActivator`。
 2. `DisplayName` 要写中文，就只能走 UTF-16LE + BOM 的 `.reg` 文件 + `reg import`；
    走 `reg add` 的命令行参数会被控制台代码页吃掉，注册表里落成乱码。
-3. 反查 Electron 自注册的激活器 GUID 时，**拿 exe 路径去问 `reg`**，不要把整棵 CLSID 树捞回来
-   自己比字符串 —— `reg.exe` 的 stdout 同样是控制台代码页编码，路径带中文时永远比不中。
+3. **通知上点按钮能不能回到进程，全看 `CustomActivator` 是不是 Electron 这次真正注册的那个 CLSID。**
+   既不能自己钉死一个常量 —— Electron 注册时会改用「开始菜单里属于本 AUMID 的那条快捷方式」记的
+   `System.AppUserModel.ToastActivatorCLSID`，于是钉死的那个 GUID 没人注册、点击整个丢掉；
+   也不能去注册表里反查 —— 同一个 exe 会攒下多条陈旧 CLSID 键，挑中哪条看运气，
+   而 `reg.exe` 的 stdout 是控制台代码页，路径带中文时永远比不中。
+   做法是按快捷方式读（`shell.readShortcutLink`），读不到才退回 `app.toastActivatorCLSID`。
+4. **点通知正文没反应，是因为 `<toast>` 上没有 `launch`。** Electron 生成的 toast XML 只把 tag
+   写在三颗按钮的 `arguments` 里，正文那一下回传的 invokedArgs 是空的 —— 认不出是哪条任务，
+   于是「按钮能点、点正文什么都不发生」。要自己生成 XML 补上 `launch`（同时把三颗按钮的
+   `arguments` 照原样写上），见 `src/shared/toastXml.ts`。
 
 另外：图标是代码画出来的（`src/shared/raster.ts` 自己光栅化、自己编 ICO），改完跑 `pnpm icons`。
 **别把 SVG 喂给 `nativeImage`** —— 它不报错，静默返回一张 0×0 空图，托盘里就什么都不剩了。

@@ -111,16 +111,26 @@
    它内置的 WASM 图标工具在内存受限环境下直接把打包流程崩掉。
 5. **通知归属是三件事，少一件都不弹**（实测，见 `src/main/aumid.ts` 顶部）：
    `app.setAppUserModelId()`、NSIS 建的开始菜单快捷方式、`HKCU\Software\Classes\AppUserModelId\<AUMID>`
-   下的 `DisplayName` / `HasSentNotification` / `CustomActivator`。两个雷：
+   下的 `DisplayName` / `HasSentNotification` / `CustomActivator`。三个雷：
    - `DisplayName` 要写中文 → **只能走 UTF-16LE + BOM 的 `.reg` 文件 + `reg import`**。
      走 `reg add` 的命令行参数会被控制台代码页吃掉，注册表里落成乱码。
-   - 找 Electron 自注册的激活器 GUID → **只能拿 exe 路径去问 `reg`**
-     （`reg query ...\CLSID /s /f <execPath> /d`），不能把整棵树捞回来自己比字符串：
-     `reg.exe` 的 stdout 是控制台代码页，中文路径按 utf8 解出来是乱码，
-     `line.includes(process.execPath)` 在本机（项目在「我的工作台」下）永远不成立 —— 
-     实测 11 个候选 0 命中，等于这个功能从来没自动写上过。输出里只取键名，GUID 本身是纯 ASCII。
-   - Electron **第一次真正走 toast 通道之后**才写下自己的 CLSID，所以 `show()` 之后要再扫一次，
-     否则装完之后的头几条通知点不动。
+   - **点通知正文要让 Windows 认得出来，就得自己生成 toast XML。** Electron 生成的
+     `<toast>` 上没有 `launch` 属性，tag 只写在按钮的 `arguments` 里 —— 点正文回传的
+     invokedArgs 是空的，`parseActivation` 认不出是哪条任务，症状是「按钮能点、点正文没反应」。
+     实测方法：`%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db` 里存着
+     通知的原始 XML，直接翻就能看见有没有 `launch`。XML 在 `src/shared/toastXml.ts`
+     （纯函数、有测试，参数格式和 `parseActivation` 对着测）。
+   - `CustomActivator` 指哪个 GUID → **既不要钉死常量，也不要去注册表反查**。
+     钉死必落空：Electron 注册时若看到「开始菜单里属于本 AUMID 的那条快捷方式」记着
+     `System.AppUserModel.ToastActivatorCLSID`，就改用那个值去写 CLSID 键、注册 COM 类对象
+     （`windows_toast_activator.cc` 的 `EnsureShortcut()`）—— 应用写死的 GUID 于是没人注册，
+     Windows 找不着活实例，点「完成/推迟」什么都不发生。反查同样不行：同一个 exe 会攒下多条
+     陈旧 CLSID 键（每次重装、每次随机 GUID 都留一条），挑中哪条看运气；而且 `reg.exe` 的 stdout
+     是控制台代码页，路径带中文（本项目就在「我的工作台」下）按 utf8 解出来永远比不中。
+     正解：`shell.readShortcutLink` 读那条快捷方式（按 AUMID 认，只有一条），读不到才退回
+     `app.toastActivatorCLSID`；启动时对齐一次，每批通知前后再各一次 —— 见 `index.ts` 的
+     `syncToastActivator()`。**注意 `app.toastActivatorCLSID` 在注册之前读到的还是本次运行新生成的
+     随机值**，跟快捷方式里那个不一样，所以顺序不能反。
 6. **开机自启只有打包版算真验过。** 开发态 `process.execPath` 是 `electron.exe`，
    注册进 `HKCU\...\Run` 的是它（2026-09-21 实测：打包版登记的是
    `"...\release\win-unpacked\todo-reminder.exe"`，键名用 AUMID）。

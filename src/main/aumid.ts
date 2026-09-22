@@ -19,9 +19,10 @@ import { join } from 'node:path'
  *
  * `DisplayName` 就是通知右上角那个署名，要跟产品名一致（「待办提醒」）。
  */
-const ACTIVATOR_LABEL = 'Electron Notification Activator'
-
 const AUMID_KEY_ROOT = 'Software\\Classes\\AppUserModelId'
+
+/** 只认标准的 GUID 形状（带不带花括号都行）—— 见 writeAumidActivator 的说明 */
+const GUID_RE = /^\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?$/
 
 function hkcuAumidKey(aumid: string): string {
   return `HKCU\\${AUMID_KEY_ROOT}\\${aumid}`
@@ -63,72 +64,15 @@ function importDisplayNames(aumid: string, displayName: string): void {
   }
 }
 
-/**
- * 反查 Electron 自己注册的激活器 GUID。**不要自造 GUID** ——
- * 见修正表第 13 条：自造的 GUID 没有任何进程注册过，Windows 会退化成
- * 按 `LocalServer32` 冷启动一个裸 exe，屏幕上弹出标题为「Electron」的欢迎页，
- * 而正在跑的进程收不到任何事件。
- *
- * **搜索方向必须是「拿 exe 路径去问 reg」，不能是「把整棵树捞出来自己比」**：
- * reg.exe 往 stdout 写的是控制台代码页（本机 GBK），Node 按 utf8 解出来中文
- * 全是乱码，于是 `line.includes(process.execPath)` 对任何带中文的路径永远不成立
- * —— 本机项目就在「我的工作台」下，实测 11 个候选一个都比不中，
- * CustomActivator 从来没被自动写上过一次。改成让 reg 自己做匹配
- * （它拿到的是 CreateProcess 传过去的 UTF-16 参数，比较是准的），
- * 我们只从输出里取**键名** —— GUID 和 CLSID 前缀是纯 ASCII，不受代码页影响。
- * 再用默认值是不是那句 label 过一道筛（label 也是纯 ASCII，比较可靠）。
- *
- * **缓存策略**：成功扫到过一次就缓存下来，之后不再扫整棵 CLSID 树。
- * - 未扫过 / 上次没扫到：保持 undefined，下次调用继续重试；
- * - 扫到：存成字符串，之后直接返回，避免每次要发通知前都跑一次
- *   `reg query /s` 全树扫描（同步执行约 80ms，会把主进程卡住）；
- * - 失败的返回值（null）**绝不缓存** —— 否则会卡死在「再也不重试」，
- *   错过 Electron 稍后写下自己 CLSID 键的时机。这正是「启动时没扫到、
- *   `show()` 前再扫一次」兜底能成立的前提：失败时永远保留重试能力。
- */
-let cachedActivatorClsid: string | undefined = undefined
-
-function findElectronActivatorClsid(): string | null {
-  if (cachedActivatorClsid !== undefined) return cachedActivatorClsid
-
-  let stdout: string
-  try {
-    stdout = execFileSync(
-      'reg.exe',
-      ['query', 'HKCU\\Software\\Classes\\CLSID', '/s', '/f', process.execPath, '/d'],
-      { encoding: 'utf8', windowsHide: true }
-    )
-  } catch {
-    // 没搜到任何匹配时 reg 返回非 0，这是正常情况，不是错误
-    return null
-  }
-
-  // 命中的通常是 ...\CLSID\{guid}\LocalServer32，取到 {guid} 那一层就截断
-  const keys = stdout.match(/HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\\{[0-9A-Fa-f-]{36}\}/g) ?? []
-  for (const key of new Set(keys)) {
-    try {
-      const line = execFileSync('reg.exe', ['query', key, '/ve'], {
-        encoding: 'utf8',
-        windowsHide: true
-      })
-      if (line.includes(ACTIVATOR_LABEL)) {
-        cachedActivatorClsid = key.slice(key.lastIndexOf('\\') + 1)
-        return cachedActivatorClsid
-      }
-    } catch {
-      /* 读不到默认值，跳过 */
-    }
-  }
-  return null
-}
-
-function write(key: string, args: string[]): void {
+function write(key: string, args: string[]): boolean {
   try {
     execFileSync('reg.exe', ['add', key, ...args], { stdio: 'ignore', windowsHide: true })
+    return true
   } catch (err) {
     // 写不进去不能让应用挂掉：注册表缺失只会让通知不显示，
     // 而调度、存储、托盘都还能正常工作。
     console.error('[aumid] 写注册表失败：', key, err)
+    return false
   }
 }
 
@@ -136,33 +80,54 @@ function write(key: string, args: string[]): void {
  * 幂等：每次启动都写一遍。写注册表很便宜，而「上次装的应用被卸载后又装回来」
  * 这种情况用一次性标记很容易漏。
  *
- * 返回是否成功写入了 CustomActivator —— Electron 何时写下它自己的 CLSID 键
- * 没有实测过（可能晚于本函数），所以调用方在每次 show() 之前要再调一次
- * `ensureAumidActivator()` 兜底。
+ * 这里**不碰 `CustomActivator`** —— 那一项归 `writeAumidActivator`，而且值不能由
+ * 我们定，只能跟着 Electron 走，理由见那个函数。
  */
-export function ensureAumidRegistered(aumid: string, displayName: string): boolean {
-  if (process.platform !== 'win32') return false
+export function ensureAumidRegistered(aumid: string, displayName: string): void {
+  if (process.platform !== 'win32') return
 
   importDisplayNames(aumid, displayName)
   write(hkcuAumidKey(aumid), [
     '/v', 'HasSentNotification', '/t', 'REG_DWORD', '/d', '1', '/f'
   ])
-  return ensureAumidActivator(aumid)
 }
 
 /**
- * 只负责把 AUMID 的 CustomActivator 指到 Electron 自注册的那个 GUID 上。
- * 扫不到就什么都不做（下次 show() 前会再试）—— 指错比不指更糟：
- * 指错会让每次点击都冷启动一个裸 electron.exe。
+ * 把 AUMID 的 `CustomActivator` 指到 `clsid`。
+ *
+ * **这个值只能来自「Electron 这次运行时到底注册了哪个」，不能由应用自己钉死。**
+ * 三方必须指同一个 GUID：Windows 按 AUMID 下的 `CustomActivator` 找人 →
+ * 拿它 CoCreateInstance → 在 ROT 里找本进程注册的 COM 类对象。
+ * 一旦这里和 Electron 实际注册的那个对不上，Windows 就找不着活着的实例，
+ * 点击整个丢掉 —— 症状正是「通知上点完成/推迟，什么都没发生」。
+ *
+ * 有两个坑，都是实测踩出来的：
+ *
+ * 1. **不能钉死常量。** Electron 注册时会用「开始菜单里那条属于本 AUMID 的
+ *    快捷方式」记的 `System.AppUserModel.ToastActivatorCLSID` 顶掉应用设的值
+ *    （`windows_toast_activator.cc` 的 `EnsureShortcut()`），随后拿这个被顶掉的
+ *    值去写 CLSID 键、注册 COM 类对象。于是应用写死的那个 GUID 没有注册表键、
+ *    也没有活实例，而 `CustomActivator` 恰恰指着它 —— 点一下什么都发生不了。
+ *    凡是机器上装过旧版（快捷方式里已经带着旧 GUID）就必然踩中。
+ * 2. **不能去注册表里反查。** 「拿 exe 路径问 reg，找一个 LocalServer32 指向自己的
+ *    CLSID 键」这条路会撞上同一个 exe 的多条陈旧键（每次重装/每次随机 CLSID 都留
+ *    一条），挑中哪条全看运气；而且 `reg.exe` 的 stdout 是控制台代码页，路径带中文
+ *    时按 utf8 解出来根本比不中。0.1.2 安装版就是这么坏的。
+ *
+ * 所以调用方传进来的必须是 `app.toastActivatorCLSID`，或者那条快捷方式里记的值
+ * （两者在 Electron 注册之后是同一个）。
+ *
+ * 校验形状再写：宁可留着上一次的值，也不要把一个不成立的 GUID 写进注册表 ——
+ * 那会让点击从「还能修」变成「指向空气」。
  */
-export function ensureAumidActivator(aumid: string): boolean {
+export function writeAumidActivator(aumid: string, clsid: string): boolean {
   if (process.platform !== 'win32') return false
+  if (!GUID_RE.test(clsid)) {
+    console.error('[aumid] 不是合法的 CLSID，跳过 CustomActivator：', clsid)
+    return false
+  }
 
-  const clsid = findElectronActivatorClsid()
-  if (!clsid) return false
-
-  write(hkcuAumidKey(aumid), [
+  return write(hkcuAumidKey(aumid), [
     '/v', 'CustomActivator', '/t', 'REG_SZ', '/d', clsid, '/f'
   ])
-  return true
 }

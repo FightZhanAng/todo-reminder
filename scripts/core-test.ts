@@ -35,6 +35,7 @@ import { groupMissed, groupToday } from '../src/shared/group'
 import { inQuietHours } from '../src/shared/quiet'
 import { ACTION_ORDER, actionLabel, actionPatch } from '../src/shared/actions'
 import { missedTag, parseActivation, taskTag } from '../src/shared/activation'
+import { buildToastXml } from '../src/shared/toastXml'
 import { describeTask, missedSummary } from '../src/shared/notifyText'
 import {
   TRAY_ICON_SCALE,
@@ -1657,6 +1658,105 @@ console.log('\n--- future.ts（以后这本账）---')
     shape(parseActivation({ type: 'click', arguments: 'type=click' })),
     shape({ kind: 'unknown' })
   )
+}
+
+// ── toast XML（Windows 只认 <toast launch> 上的正文参数，见 shared/toastXml.ts）──
+{
+  const id = '97fbbb4e-a7ba-4c6f-bf72-05ed1cafbdd3'
+  const at = 1789982220000
+  const tag = taskTag(id, at)
+  const shape = (v: unknown): string => JSON.stringify(v)
+
+  // Windows 读 XML 时会把实体还原回来 —— 这里就得干这件事，
+  // 否则测的不是「Windows 看到什么」，而是「XML 长什么样」
+  const unesc = (s: string): string =>
+    s
+      .replace(/&quot;/g, '"')
+      .replace(/&gt;/g, '>')
+      .replace(/&lt;/g, '<')
+      .replace(/&amp;/g, '&')
+  const attrOf = (src: string, name: string): string[] => {
+    const out: string[] = []
+    const needle = `${name}="`
+    let i = src.indexOf(needle)
+    while (i >= 0) {
+      const start = i + needle.length
+      const end = src.indexOf('"', start)
+      out.push(unesc(src.slice(start, end)))
+      i = src.indexOf(needle, end)
+    }
+    return out
+  }
+
+  const xml = buildToastXml({
+    tag,
+    title: '交房租',
+    body: '今天 17:00',
+    buttons: ['完成', '推迟 10 分钟', '推到明天'],
+    silent: true
+  })
+
+  // 这一条是整段的重点：Electron 生成的 XML 没有 launch，点正文就什么都收不到
+  check('toast：正文那一下带上了 launch', attrOf(xml, 'launch')[0], `type=click&tag=${tag}`)
+  check(
+    'toast：正文那一下被解释成「打开」',
+    shape(parseActivation({ type: 'click', arguments: attrOf(xml, 'launch')[0]! })),
+    shape({ kind: 'open', taskId: id })
+  )
+
+  const args = attrOf(xml, 'arguments')
+  check('toast：三颗按钮', args.length, 3)
+  check(
+    'toast：第 0 颗是完成',
+    shape(parseActivation({ type: 'action', actionIndex: 0, arguments: args[0]! })),
+    shape({ kind: 'action', taskId: id, action: 'complete' })
+  )
+  check(
+    'toast：第 1 颗是推迟',
+    shape(parseActivation({ type: 'action', actionIndex: 1, arguments: args[1]! })),
+    shape({ kind: 'action', taskId: id, action: 'snooze' })
+  )
+  check(
+    'toast：第 2 颗是推到明天',
+    shape(parseActivation({ type: 'action', actionIndex: 2, arguments: args[2]! })),
+    shape({ kind: 'action', taskId: id, action: 'tomorrow' })
+  )
+
+  // 聚合通知那颗「打开待办」与任务的「完成」同为下标 0，参数里靠 missed: 前缀区分
+  const missedXml = buildToastXml({
+    tag: missedTag(id, at),
+    title: '有 2 件事错过了',
+    body: '交房租、交电费',
+    buttons: ['打开待办'],
+    silent: true
+  })
+  check(
+    'toast：聚合通知的按钮落在「打开」',
+    shape(
+      parseActivation({
+        type: 'action',
+        actionIndex: 0,
+        arguments: attrOf(missedXml, 'arguments')[0]!
+      })
+    ),
+    shape({ kind: 'open', taskId: id })
+  )
+
+  check('toast：静音写 audio silent', xml.includes('<audio silent="true"/>'), true)
+  const loud = buildToastXml({ tag, title: '交房租', body: '', buttons: ['完成'], silent: false })
+  check('toast：不静音就不写 audio', loud.includes('<audio'), false)
+  check('toast：正文为空时不渲染第二个 text', (loud.match(/<text>/g) ?? []).length, 1)
+
+  const odd = buildToastXml({
+    tag,
+    title: 'a & b < c',
+    body: 'd " e',
+    buttons: ['x & y'],
+    silent: true
+  })
+  check('toast：标题里的 & 与 < 被转义', odd.includes('a &amp; b &lt; c'), true)
+  check('toast：正文里的引号被转义', odd.includes('d &quot; e'), true)
+  check('toast：按钮文案里的 & 被转义', odd.includes('content="x &amp; y"'), true)
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)

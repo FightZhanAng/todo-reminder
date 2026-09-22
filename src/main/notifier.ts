@@ -4,6 +4,7 @@ import { missedTag, parseActivation, taskTag, type ActivationLike } from '../sha
 import type { Command } from '../shared/commands'
 import type { Notice } from '../shared/ipc'
 import { describeTask, missedSummary } from '../shared/notifyText'
+import { buildToastXml } from '../shared/toastXml'
 import type { RemindableTask } from '../shared/types'
 import type { NotifyBatch } from './scheduler'
 import type { Store } from './store'
@@ -43,9 +44,11 @@ export interface NotifierDeps {
  * tag 认人，所以冷启动、Notification 对象已被回收、从通知中心点旧通知这三种情形
  * 也都接得住。macOS / Linux 没有这个入口，仍走实例事件。
  *
- * 一条要知道的边界：Windows 上**只回传按钮**（`type=action`）。点正文收不到任何回调 ——
- * 系统自己把应用窗口提到前面就完事了（用户看到的「点正文有延迟」就是这一下）。
- * 所以「点到哪条任务就滚到哪条」只有按钮路径做得到，正文那条留给系统。
+ * 一条要知道的边界：Windows 上按钮和正文**都**回传激活，但正文那一下的参数只来自
+ * toast XML 的 `<toast launch="...">`，而 Electron 生成的 XML 里没有这个属性 ——
+ * 于是点正文回传空参数、认不出是哪条任务（2026-09-22 用本机通知数据库里的原始
+ * XML 实测）。所以 Windows 的 XML 由我们自己生成（`shared/toastXml.ts`），
+ * 把 tag 同时写进 `launch` 和三颗按钮的 `arguments`。
  */
 export class Notifier {
   private readonly handled = new Map<string, number>()
@@ -78,15 +81,23 @@ export class Notifier {
   private showTask(task: RemindableTask, at: number): void {
     const { title, body } = describeTask(task, at, Date.now())
     const snoozeMinutes = this.deps.store.settings.snoozeMinutes
+    const tag = taskTag(task.id, at)
+    const silent = !this.deps.store.settings.soundEnabled
+    const buttons = ACTION_ORDER.map((a) => actionLabel(a, snoozeMinutes))
     const n = new Notification({
-      id: taskTag(task.id, at),
-      title,
-      body,
-      silent: !this.deps.store.settings.soundEnabled,
-      actions: ACTION_ORDER.map((a) => ({
-        type: 'button' as const,
-        text: actionLabel(a, snoozeMinutes)
-      }))
+      id: tag,
+      ...(process.platform === 'win32'
+        ? {
+            // Windows 必须自己给 XML 补 launch：Electron 生成的那份没有它，
+            // 点正文回传的是空参数、认不出是哪条任务。见 shared/toastXml.ts
+            toastXml: buildToastXml({ tag, title, body, buttons, silent })
+          }
+        : {
+            title,
+            body,
+            silent,
+            actions: buttons.map((text) => ({ type: 'button' as const, text }))
+          })
     })
 
     if (process.platform !== 'win32') {
@@ -118,13 +129,20 @@ export class Notifier {
 
     const at = Date.now()
     const { title, body } = missedSummary(batch.missed, MISSED_MAX_TITLES)
+    // 时间戳进 tag，否则同一批补发会顶掉上一条还没点的
+    const tag = missedTag(first.task.id, at)
+    const silent = !this.deps.store.settings.soundEnabled
     const n = new Notification({
-      // 时间戳进 tag，否则同一批补发会顶掉上一条还没点的
-      id: missedTag(first.task.id, at),
-      title,
-      body,
-      silent: !this.deps.store.settings.soundEnabled,
-      actions: [{ type: 'button', text: '打开待办' }]
+      id: tag,
+      // 同 showTask：正文那一下要靠 <toast launch> 才认得出来
+      ...(process.platform === 'win32'
+        ? { toastXml: buildToastXml({ tag, title, body, buttons: ['打开待办'], silent }) }
+        : {
+            title,
+            body,
+            silent,
+            actions: [{ type: 'button' as const, text: '打开待办' }]
+          })
     })
     if (process.platform !== 'win32') {
       n.on('action', () => this.deps.onFocusTask(first.task.id))
