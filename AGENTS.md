@@ -323,6 +323,15 @@
    顺带一条：**这个坑的入口是「构建被打断」**。electron-builder 每次都要清自己的
    `win-unpacked.tmp`，而它一旦被中断就会留下一个 `resources\` 尾巴。所以宁可
    「先想好输出目录再跑」也别中途 Ctrl-C。
+   清理这种「有一个文件删不掉的树」时，另有两个反直觉的行为（2026-09-29 实测）：
+
+   - **`shutil.rmtree` 是原子的**：树里只要有一个文件被占用，整棵树**一个字节都不会删**
+     （对照实验：0 个文件被占用的树 166 个文件一趟删干净；1 个被占用的树释放 0 MB）。
+     正解是 `os.walk(root, topdown=False)` 逐文件 `os.remove`、失败的 `except OSError: pass`
+     跳过 —— 慢（247 个文件 3 分 42 秒），但能把能删的全拿回来。
+   - **别用改名去「挪开」**：`shutil.move` 在 shim 下是「先复制、再送源去回收站」，
+     源删不掉就会**凭空留一份拷贝**。把 `release` 改名成 `release-old` 的后果是
+     多出 1.1 GB（`release-old/` 加 `release-old/release/` 两份）。
 
 ## 文件卫生
 
