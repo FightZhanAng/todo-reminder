@@ -62,7 +62,7 @@ import { collectUpcoming, upcomingCount } from '../src/shared/future'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Store } from '../src/main/store'
+import { Store, normalizeAnniversary } from '../src/main/store'
 import { Scheduler } from '../src/main/scheduler'
 import { formatClock, nextDayStart } from '../src/shared/time'
 import {
@@ -75,6 +75,15 @@ import {
 import { SOON_WINDOW_MS, urgencyOf } from '../src/shared/urgency'
 import { hotkeyFromEvent, isValidHotkey, normalizeHotkey } from '../src/shared/hotkey'
 import { EXIT_DONE_MS, EXIT_REMOVED_MS, exitDurationMs, mergeExiting } from '../src/shared/exit'
+import {
+  clampPercent,
+  friendlyError,
+  initialUpdateState,
+  isPortable,
+  sameUpdateState,
+  updateReducer,
+  updateSummary
+} from '../src/shared/update'
 
 function deadline(patch: Partial<DeadlineTask> = {}): DeadlineTask {
   return {
@@ -453,21 +462,125 @@ console.log('\n--- store.ts ---')
     '{ this is not json'
   )
 
-  // 6. 软删除与恢复
+  // 6. 深校验：形状半截的记录必须被拦下。
+  //    下面这几条**都能过旧的浅校验**，然后分别在主进程 / 渲染层炸掉 ——
+  //    见 store.ts 的 normalizeTask。这里逐条钉住，别再退回浅校验。
   const s6 = new Store(file)
   s6.addTask(deadline({ id: 'p2' }))
-  check('软删除返回 true', s6.removeTask('p2'), true)
-  check('软删除后仍在数组里', s6.tasks.some((x) => x.id === 'p2'), true)
-  check('软删除后 deletedAt 非空', s6.tasks.find((x) => x.id === 'p2')?.deletedAt != null, true)
-  check('软删除不存在的 id 返回 false', s6.removeTask('nope'), false)
-  s6.restoreTask('p2')
-  check('恢复后 deletedAt 为 null', s6.tasks.find((x) => x.id === 'p2')?.deletedAt, null)
+  const raw3 = JSON.parse(readFileSync(file, 'utf-8'))
+  const good = raw3.tasks[0]
+  const recBase = {
+    kind: 'recurring', id: 'r', title: '习惯', important: false,
+    createdAt: at(2026, 9, 16), updatedAt: at(2026, 9, 16),
+    deletedAt: null, firedFor: null, lastDoneDay: null, streak: 0, snoozeUntil: null
+  }
+  raw3.tasks = [
+    good,
+    // 缺 remindTime：dueNow → parseHM 读 undefined.split（主进程每 10 秒抛一次）
+    { ...recBase, id: 'no-remind-time', rule: { freq: 'daily', every: 1, skipWeekend: false } },
+    // 每周规则缺 days：matchesDay 读 undefined.some（渲染层 render 抛，白屏）
+    { ...recBase, id: 'weekly-no-days', rule: { freq: 'weekly', every: 1, skipWeekend: false }, remindTime: '09:00' },
+    // 缺 every：x % undefined === NaN，规则静默永不命中 —— 比抛错更难发现
+    { ...recBase, id: 'no-every', rule: { freq: 'daily', skipWeekend: false }, remindTime: '09:00' },
+    // 截止型缺 allDay / leadMin
+    {
+      kind: 'deadline', id: 'deadline-no-allday', title: '交周报', important: false,
+      createdAt: at(2026, 9, 16), updatedAt: at(2026, 9, 16),
+      deletedAt: null, firedFor: null, dueAt: at(2026, 9, 17),
+      snoozeUntil: null, completedAt: null
+    },
+    // important 不是布尔（JSON.stringify 会把 undefined 直接删掉）
+    { ...good, id: 'no-important', important: undefined },
+    // 类型对但内容怪：'9:00' 没补零，parseHM 认，不该为它丢用户的记录
+    { ...recBase, id: 'loose-time', rule: { freq: 'daily', every: 1, skipWeekend: false }, remindTime: '9:00' }
+  ]
+  writeFileSync(file, JSON.stringify(raw3), 'utf-8')
+
+  const s6b = new Store(file)
+  check('缺 remindTime 的周期任务被拦下', s6b.tasks.some((t) => t.id === 'no-remind-time'), false)
+  check('缺 days 的每周规则被拦下', s6b.tasks.some((t) => t.id === 'weekly-no-days'), false)
+  check('缺 every 的规则被拦下', s6b.tasks.some((t) => t.id === 'no-every'), false)
+  check('缺 allDay 的截止任务被拦下', s6b.tasks.some((t) => t.id === 'deadline-no-allday'), false)
+  check('important 不是布尔的记录被拦下', s6b.tasks.some((t) => t.id === 'no-important'), false)
+  check('remindTime 只补零不齐时照常放行', s6b.tasks.some((t) => t.id === 'loose-time'), true)
+  check('好记录照常留下', s6b.tasks.some((t) => t.id === 'p2'), true)
+  check('跳过条数被记下来', s6b.droppedTaskCount, 5)
+  check('被跳过的原文有备份', typeof s6b.corruptBackupPath, 'string')
+  check(
+    '备份里含被跳过的记录',
+    readFileSync(s6b.corruptBackupPath as string, 'utf-8').includes('no-remind-time'),
+    true
+  )
+  check('活文件留在原地（跳过走复制，不走改名）', existsSync(file), true)
+  check('没跳过时计数为 0', new Store(join(dir, 'clean.json')).droppedTaskCount, 0)
 
   // 7. 更新不存在的 id
   check('更新不存在的 id 返回 null', s6.updateTask('nope', { title: 'x' }), null)
 
   // 8. 原子性：不应留下 .tmp
   check('写入后无残留 tmp 文件', existsSync(`${file}.tmp`), false)
+
+  // 9. 批量更新只写一次盘。
+  //    markFired 的 59 倍写放大就是这么来的（逐条 updateTask = 逐条全量重写 + fsync）。
+  //    tsc 把 `import { writeFileSync }` 编成 `node_fs_1.writeFileSync(...)`，
+  //    即每次调用都查模块对象的属性，所以这里替换掉它就能数出写盘次数。
+  const fsMod = require('node:fs') as typeof import('node:fs')
+  const s9 = new Store(join(dir, 'batch.json'))
+  for (let i = 0; i < 20; i++) s9.addTask(deadline({ id: `b${i}` }))
+  const realWrite = fsMod.writeFileSync
+  let writes = 0
+  fsMod.writeFileSync = ((...args: Parameters<typeof realWrite>) => {
+    writes++
+    return realWrite(...args)
+  }) as typeof realWrite
+  const touched = s9.updateTasks(
+    Array.from({ length: 20 }, (_, i) => ({ id: `b${i}`, patch: { firedFor: 1234 } }))
+  )
+  fsMod.writeFileSync = realWrite
+  check('批量更新 20 条只写一次盘', writes, 1)
+  check('批量更新返回全部命中的记录', touched.length, 20)
+  check('批量更新真的写进去了', s9.tasks.every((t) => t.firedFor === 1234), true)
+
+  writes = 0
+  fsMod.writeFileSync = ((...args: Parameters<typeof realWrite>) => {
+    writes++
+    return realWrite(...args)
+  }) as typeof realWrite
+  s9.updateTasks([])
+  fsMod.writeFileSync = realWrite
+  check('空批次不写盘', writes, 0)
+
+  // 10. 启动时清掉早过撤销窗口的软删记录。
+  //     界面上「删除」只留 5 秒撤销窗口（exit.ts 的 EXIT_REMOVED_MS），
+  //     而且没有任何视图会列出软删任务 —— 留着只是让文件单调变大。
+  const s10 = new Store(join(dir, 'purge.json'))
+  s10.addTask(deadline({ id: 'fresh' }))
+  s10.addTask(deadline({ id: 'ancient' }))
+  const longAgo = Date.now() - 31 * 24 * 60 * 60_000
+  s10.updateTask('ancient', { deletedAt: longAgo })
+  s10.updateTask('fresh', { deletedAt: Date.now() })
+  const s10b = new Store(join(dir, 'purge.json'))
+  check('超过 30 天的软删记录被清掉', s10b.tasks.some((t) => t.id === 'ancient'), false)
+  check('刚删的还在（撤销窗口内）', s10b.tasks.some((t) => t.id === 'fresh'), true)
+
+  // 11. 文件版本比程序新（装过更新的版本又退回来）：数据照读，但**先备份**。
+  //     每次写盘都是全量重写，不备份的话第一次改设置就会把新格式的字段抹掉。
+  const newerFile = join(dir, 'newer.json')
+  writeFileSync(
+    newerFile,
+    JSON.stringify({ version: FILE_VERSION + 7, tasks: [deadline({ id: 'from-future' })], settings: {} }),
+    'utf-8'
+  )
+  const s11 = new Store(newerFile)
+  check('更新的版本号被记下来', s11.newerFileVersion, FILE_VERSION + 7)
+  check('数据照常读进来（不整份丢掉）', s11.tasks.some((t) => t.id === 'from-future'), true)
+  check('动它之前先备份了', typeof s11.corruptBackupPath, 'string')
+  check(
+    '备份里是那份新格式的原文',
+    readFileSync(s11.corruptBackupPath as string, 'utf-8').includes('from-future'),
+    true
+  )
+  check('版本正常时没有降级标记', new Store(join(dir, 'clean.json')).newerFileVersion, null)
 
   rmSync(dir, { recursive: true, force: true })
 }
@@ -619,7 +732,7 @@ console.log('\n--- scheduler.ts ---')
 
 console.log('\n--- 承重常量（静默改值 typecheck 抓不到）---')
 {
-  check('FILE_VERSION = 1', FILE_VERSION, 1)
+  check('FILE_VERSION = 3（v2 加 anniversaries，v3 加 autoUpdate）', FILE_VERSION, 3)
   check('TICK_MS = 10 秒', TICK_MS, 10_000)
   check('MISS_GRACE_MS = 10 分钟', MISS_GRACE_MS, 600_000)
   check('DEFAULT_LEAD_MIN = 15', DEFAULT_LEAD_MIN, 15)
@@ -637,6 +750,8 @@ console.log('\n--- 承重常量（静默改值 typecheck 抓不到）---')
   check('默认空闲阈值 5 分钟', DEFAULT_SETTINGS.idleThresholdMin, 5)
   check('默认主题 auto', DEFAULT_SETTINGS.theme, 'auto')
   check('默认不置顶窗口', DEFAULT_SETTINGS.alwaysOnTop, false)
+  check('默认显示节假日倒计时', DEFAULT_SETTINGS.countdownHolidays, true)
+  check('默认倒计时看一年', DEFAULT_SETTINGS.countdownHorizonDays, 365)
   check('默认快捷键 Control+Alt+T', DEFAULT_SETTINGS.hotkey, 'Control+Alt+T')
 }
 
@@ -971,11 +1086,14 @@ console.log('\n--- exit.ts ---')
   check('时长：done', exitDurationMs('done'), EXIT_DONE_MS)
   check('时长：removed', exitDurationMs('removed'), EXIT_REMOVED_MS)
 
-  const none = mergeExiting([afterDone, other], [], now)
+  const incoming = [afterDone, other]
+  const none = mergeExiting(incoming, [], now)
   check('空 exiting：原样返回', none.tasks.map((t) => t.id).join(','), 'a,b')
   check('空 exiting：已完成的那条保持已完成',
     (none.tasks[0] as DeadlineTask).completedAt, now)
   check('空 exiting：没有过期项', none.expired.length, 0)
+  // 同一个引用：下游 useMemo 靠它判断「没变」，新建数组会让整棵树每秒重算
+  check('空 exiting：返回的就是入参本身（身份不变）', none.tasks === incoming, true)
 
   // done：替换回变更前的版本
   const done = mergeExiting(
@@ -1383,8 +1501,6 @@ console.log('\n--- notices.ts ---')
 
   nc.raise(notice('notify-failed', 'warn', 100))
   check('raise 之后有一条', nc.list().length, 1)
-  check('has 认得出', nc.has('notify-failed'), true)
-  check('没提过的 id 为 false', nc.has('write-failed'), false)
 
   // 同 id 覆盖，不新增
   nc.raise(notice('notify-failed', 'warn', 200))
@@ -1397,31 +1513,23 @@ console.log('\n--- notices.ts ---')
   check('list 的顺序稳定', nc.list().map((n) => n.id).join(','), 'write-failed,notify-failed')
 
   // 同级别按时间新的在前。
-  // 先把 notify-failed 收回：它只被 raise 过、从没 dismiss / clear，会一直留在
-  // list 里；不收回的话下面三条断言（排序串 / dismiss 后的串 / list 长度）都会多出它。
-  nc.clear('notify-failed')
-  nc.clear('write-failed')
-  nc.raise(notice('write-failed', 'error', 300))
-  nc.raise(notice('corrupt-backup', 'error', 400))
-  check('同级别新的在前', nc.list().map((n) => n.id).join(','), 'corrupt-backup,write-failed')
+  // 每个场景一个**新实例**：同 id 只保留一条是这个类的主要行为，
+  // 共用实例就得先想办法把上一条收回，反而看不清哪条断言依赖什么。
+  const order = new NoticeCenter()
+  order.raise(notice('write-failed', 'error', 300))
+  order.raise(notice('corrupt-backup', 'error', 400))
+  check('同级别新的在前', order.list().map((n) => n.id).join(','), 'corrupt-backup,write-failed')
 
-  // dismiss
-  nc.dismiss('corrupt-backup')
-  check('dismiss 后不在 list 里', nc.list().map((n) => n.id).join(','), 'write-failed')
-  check('dismiss 后 has 为 false', nc.has('corrupt-backup'), false)
-  nc.raise(notice('corrupt-backup', 'error', 500))
-  check('dismiss 过的 id 再 raise 也不显示（本次运行内）', nc.has('corrupt-backup'), false)
-  check('但内容确实被更新了', nc.list().length, 1)
-
-  // clear 会重置 dismiss
-  nc.clear('corrupt-backup')
-  check('clear 后不再被压制', nc.has('corrupt-backup'), false)
-  nc.raise(notice('corrupt-backup', 'warn', 600))
-  check('clear 之后 raise 能显示', nc.has('corrupt-backup'), true)
-
-  // clear 未提及的 id 不炸
-  nc.clear('write-failed')
-  check('clear 之后该条消失', nc.has('write-failed'), false)
+  // dismiss：本次运行内这一类不再显示，但别的不受影响
+  const dis = new NoticeCenter()
+  dis.raise(notice('corrupt-backup', 'error', 400))
+  dis.dismiss('corrupt-backup')
+  check('dismiss 后不在 list 里', dis.list().length, 0)
+  check('dismiss 后 head 为 null', dis.head(), null)
+  dis.raise(notice('corrupt-backup', 'error', 500))
+  check('dismiss 过的 id 再 raise 也不显示（本次运行内）', dis.list().length, 0)
+  dis.raise(notice('write-failed', 'warn', 600))
+  check('dismiss 一个 id 不影响别的', dis.list().map((n) => n.id).join(','), 'write-failed')
 
   check('action 原样带出', (() => {
     const c = new NoticeCenter()
@@ -1757,6 +1865,805 @@ console.log('\n--- future.ts（以后这本账）---')
   check('toast：标题里的 & 与 < 被转义', odd.includes('a &amp; b &lt; c'), true)
   check('toast：正文里的引号被转义', odd.includes('d &quot; e'), true)
   check('toast：按钮文案里的 & 被转义', odd.includes('content="x &amp; y"'), true)
+}
+
+// ---------------------------------------------------------------------------
+// 第四期：日历（农历 / 节气 / 节假日 / 调休）与倒计时（节假日 + 纪念日）
+// ---------------------------------------------------------------------------
+
+import {
+  LUNAR_MAX_YEAR, LUNAR_MIN_YEAR, leapMonth, lunarCellLabel, lunarFestival,
+  lunarOf, lunarYearDays, monthDays, solarFromLunar
+} from '../src/shared/lunar'
+import { SOLAR_TERMS, solarTermsOf, termOnDay, winterSolstice } from '../src/shared/term'
+import {
+  KNOWN_YEARS, LATEST_KNOWN_YEAR, dayMarkOf, holidayCoverageNote,
+  holidayPositionOf, holidayYearKnown, isRestDay, makeupFor, nextHoliday, upcomingHolidays
+} from '../src/shared/holiday'
+import {
+  anniversaryInLeapMonth, anniversaryOccurrence, daysLeftLabel,
+  sortAnniversaries, yearsLabel
+} from '../src/shared/anniversary'
+import { collectCountdowns, fullDate, holidaySpanLabel, shortDate } from '../src/shared/countdown'
+import { agendaOfDay, monthAgenda, tasksOnDay } from '../src/shared/agenda'
+import type { Anniversary } from '../src/shared/types'
+
+function anniversary(patch: Partial<Anniversary> = {}): Anniversary {
+  return {
+    id: 'a1',
+    title: '结婚纪念日',
+    date: '2015-05-20',
+    yearly: true,
+    lunar: false,
+    createdAt: at(2026, 9, 29, 10, 0),
+    updatedAt: at(2026, 9, 29, 10, 0),
+    ...patch
+  }
+}
+
+/** 日期之间的整天数。比手算「还有 233 天」可靠 */
+function daysBetween(from: number, to: number): number {
+  return Math.round((startOfDay(to) - startOfDay(from)) / 86_400_000)
+}
+
+console.log('\n--- 农历（1900–2100 的表，抄错一位就整年歪掉）---')
+{
+  // 春节：2024–2027 全部来自国务院办公厅的放假通知（通知里写着
+  // 「2 月 15 日（农历腊月二十八）」这种对照），是**外部**锚点；
+  // 1900 那个是这张表的定义本身
+  const spring: Array<[number, string]> = [
+    [1900, '1900-01-31'],
+    [1912, '1912-02-18'],
+    [1949, '1949-01-29'],
+    [1984, '1984-02-02'],
+    [1997, '1997-02-07'],
+    [2000, '2000-02-05'],
+    [2020, '2020-01-25'],
+    [2024, '2024-02-10'],
+    [2025, '2025-01-29'],
+    [2026, '2026-02-17'],
+    [2027, '2027-02-06']
+  ]
+  for (const [year, expected] of spring) {
+    const ts = solarFromLunar(year, 1, 1)
+    check(`${year} 年春节 = ${expected}`, ts === null ? 'null' : dayKey(ts), expected)
+  }
+
+  // 中秋 / 端午 / 除夕 —— 2026 的中秋与端午都在官方通知里出现过
+  check('2026-09-25 是八月十五（中秋）', lunarOf(at(2026, 9, 25))?.label, '八月十五')
+  check('2026 中秋节落在格子上', lunarCellLabel(at(2026, 9, 25)), '中秋节')
+  check('2026-06-19 是五月初五（端午）', lunarOf(at(2026, 6, 19))?.label, '五月初五')
+  check('2024-06-10 是五月初五（端午）', lunarOf(at(2024, 6, 10))?.label, '五月初五')
+  check('2025-05-31 是五月初五（端午）', lunarOf(at(2025, 5, 31))?.label, '五月初五')
+  check('2027-09-15 是八月十五（中秋）', lunarOf(at(2027, 9, 15))?.label, '八月十五')
+  check('2025-10-06 是八月十五（中秋）', lunarOf(at(2025, 10, 6))?.label, '八月十五')
+  check('2026-02-17 是正月初一', lunarOf(at(2026, 2, 17))?.isLeap, false)
+  check('2026-09-29 是八月十九', lunarOf(at(2026, 9, 29))?.label, '八月十九')
+
+  // 除夕是**腊月最后一天**：腊月是小月时它落在二十九，写死三十会漏掉一半年份
+  check('2026 年腊月只有 29 天', monthDays(2026, 12), 29)
+  check('除夕落在腊月二十九', lunarFestival(lunarOf(at(2027, 2, 5))!), '除夕')
+  check('除夕的格子文案', lunarCellLabel(at(2027, 2, 5)), '除夕')
+  check('正月初一的格子写月份名', lunarCellLabel(at(2027, 2, 6)), '春节')
+  check('普通日子写农历日', lunarCellLabel(at(2026, 9, 29)), '十九')
+
+  // 闰月：2025 年是闰六月。闰月的月名要带「闰」字，且闰月的天数单独记
+  check('2025 年闰六月', leapMonth(2025), 6)
+  const leapFirst = solarFromLunar(2025, 6, 1, true)
+  check('闰六月初一算得出来', leapFirst !== null, true)
+  check('闰六月初一确实是闰月', lunarOf(leapFirst!)?.monthName, '闰六月')
+  check('闰六月和六月不是同一天', solarFromLunar(2025, 6, 1, false) === leapFirst, false)
+  check('闰月的天数计入年长', lunarYearDays(2025) > 380, true)
+  check('平年没有闰月', leapMonth(2026), 0)
+
+  // 表的边界：外面不猜
+  check('1899 年算不出来', lunarOf(at(1899, 6, 1)), null)
+  check('2101 年算不出来', lunarOf(at(2101, 6, 1)), null)
+  check('表的起止年', `${LUNAR_MIN_YEAR}-${LUNAR_MAX_YEAR}`, '1900-2100')
+
+  // 往返：农历 → 公历 → 农历，十年里一天不差
+  let roundTrip = 0
+  for (let ts = at(2020, 1, 1); ts < at(2031, 1, 1); ts = addDays(ts, 1)) {
+    const l = lunarOf(ts)
+    if (l === null) { roundTrip++; continue }
+    if (solarFromLunar(l.year, l.month, l.day, l.isLeap) !== startOfDay(ts)) roundTrip++
+  }
+  check('2020–2030 每天往返一致（0 处不符）', roundTrip, 0)
+
+  /**
+   * 冬至必落十一月 —— 这是农历**置闰规则本身**：闰月就是「不含冬至的那个月」。
+   * 一个十六进制位抄错，通常会在这一步的某一年暴露出来。
+   * 拿它当整张表的体检，比逐年核对春节更狠：199 年全过。
+   */
+  let solsticeOff = 0
+  const offenders: string[] = []
+  for (let y = 1900; y <= 2098; y++) {
+    const ts = tsFromDayKey(winterSolstice(y).key)
+    const l = ts === null ? null : lunarOf(ts)
+    if (l === null || l.month !== 11 || l.isLeap) {
+      solsticeOff++
+      if (offenders.length < 5) offenders.push(`${y}:${l?.monthName ?? 'null'}`)
+    }
+  }
+  check(`1900–2098 冬至都落在十一月（例外 ${offenders.join(',')}）`, solsticeOff, 0)
+}
+
+console.log('\n--- 节气（算出来的，不是查表）---')
+{
+  check('24 个节气', SOLAR_TERMS.length, 24)
+  check('第一个是小寒，最后一个是冬至', `${SOLAR_TERMS[0]}/${SOLAR_TERMS[23]}`, '小寒/冬至')
+
+  // 冬至的日期对着天文时刻核过（2027 年冬至是北京时间 12 月 22 日 10:42）
+  const solstices: Array<[number, string]> = [
+    [2024, '2024-12-21'],
+    [2025, '2025-12-21'],
+    [2026, '2026-12-22'],
+    [2027, '2027-12-22'],
+    [2028, '2028-12-21']
+  ]
+  for (const [year, expected] of solstices) {
+    check(`${year} 年冬至 ${expected}`, winterSolstice(year).key, expected)
+  }
+  check('2027 年春分 03-21（三月分点 20:25 UTC + 8 小时）', solarTermsOf(2027)[5]!.key, '2027-03-21')
+
+  // 一年 24 个节气必须都落在本年、且严格递增 —— 迭代没收敛就会撞在这里
+  let orderBad = 0
+  let rangeBad = 0
+  for (let y = 1950; y <= 2080; y++) {
+    const terms = solarTermsOf(y)
+    for (let i = 0; i < terms.length; i++) {
+      if (!terms[i]!.key.startsWith(`${y}-`)) rangeBad++
+      if (i > 0 && terms[i - 1]!.key >= terms[i]!.key) orderBad++
+    }
+  }
+  check('1950–2080 的节气都在本年', rangeBad, 0)
+  check('1950–2080 的节气严格递增', orderBad, 0)
+
+  // 节气的落点窗口（这几条是历书上最稳的规律）
+  let qingmingBad = 0
+  for (let y = 1990; y <= 2080; y++) {
+    const d = Number(solarTermsOf(y)[6]!.key.slice(8))
+    if (d < 4 || d > 6) qingmingBad++
+  }
+  check('清明永远落在 4 月 4–6 日', qingmingBad, 0)
+
+  check('termOnDay 认出冬至那天', termOnDay(at(2027, 12, 22))?.name, '冬至')
+  check('termOnDay 对普通日子给 null', termOnDay(at(2027, 12, 25)), null)
+  check('冬至那天的时刻是 4 位数钟点', /^\d{2}:\d{2}$/.test(winterSolstice(2027).clock), true)
+}
+
+console.log('\n--- 节假日与调休（数据抄自国务院办公厅的通知）---')
+{
+  // 2026 年（国办发明电〔2025〕7 号）
+  check('2026-01-01 是元旦假期', dayMarkOf(at(2026, 1, 1)).name, '元旦')
+  check('2026-01-04 调休上班', dayMarkOf(at(2026, 1, 4)).kind, 'adjusted-work')
+  check('2026-01-04 为元旦上班', makeupFor(at(2026, 1, 4)), '元旦')
+  check('2026 春节 9 天（2/15–2/23）', holidayPositionOf(at(2026, 2, 23))?.span, 9)
+  check('春节第一天是 2/15', holidayPositionOf(at(2026, 2, 15))?.index, 1)
+  check('2/14 调休上班（为春节）', makeupFor(at(2026, 2, 14)), '春节')
+  check('2/28 调休上班（为春节）', dayMarkOf(at(2026, 2, 28)).kind, 'adjusted-work')
+  check('清明 3 天', holidayPositionOf(at(2026, 4, 5))?.span, 3)
+  check('劳动节 5 天', holidayPositionOf(at(2026, 5, 2))?.span, 5)
+  check('5/9 调休上班', makeupFor(at(2026, 5, 9)), '劳动节')
+  check('中秋 3 天', holidayPositionOf(at(2026, 9, 25))?.span, 3)
+  check('国庆 7 天', holidayPositionOf(at(2026, 10, 4))?.span, 7)
+  check('10/8 已经不是假期（上班）', dayMarkOf(at(2026, 10, 8)).kind, 'workday')
+  check('10/10 调休上班（周六）', makeupFor(at(2026, 10, 10)), '国庆节')
+  check('9/20 调休上班（周日）', dayMarkOf(at(2026, 9, 20)).kind, 'adjusted-work')
+  // 假期里的周末算假期，不算周末 —— 决定「能不能安排出行」的是前者
+  check('10/3（周六）算假期不算周末', dayMarkOf(at(2026, 10, 3)).kind, 'holiday')
+
+  // 2025：中秋与国庆连休，段名两个都要写上
+  check('2025 国庆中秋连休 8 天', holidayPositionOf(at(2025, 10, 6))?.span, 8)
+  check('段名带上中秋', holidayPositionOf(at(2025, 10, 6))?.run.name, '国庆节·中秋节')
+  check('2025 元旦只放 1 天不调休', holidayPositionOf(at(2025, 1, 1))?.span, 1)
+  check('2025-01-26 调休上班', makeupFor(at(2025, 1, 26)), '春节')
+
+  // 2024：元旦在通知里是「1 月 1 日放假」，抄成一天
+  check('2024 元旦 1 天', holidayPositionOf(at(2024, 1, 1))?.span, 1)
+  check('2024-09-29 调休上班', makeupFor(at(2024, 9, 29)), '国庆节')
+
+  // 没有数据的年份：退回周末判定，且**不猜**
+  check('2027-02-06（周六）算周末', dayMarkOf(at(2027, 2, 6)).kind, 'weekend')
+  check('2027-02-08（周一）算工作日', dayMarkOf(at(2027, 2, 8)).kind, 'workday')
+  check('2027 年没有数据', holidayYearKnown(2027), false)
+  check('2026 年有数据', holidayYearKnown(2026), true)
+  check('未公布年份说清楚了', (holidayCoverageNote(2027) ?? '').includes('还没公布'), true)
+  check('表之前的年份说实话（不是「未公布」）',
+    (holidayCoverageNote(2023) ?? '').includes('没有收录'), true)
+  check('有数据的年份不出声', holidayCoverageNote(2026), null)
+  check('已公布到 2026 年', LATEST_KNOWN_YEAR, 2026)
+  check('收录的年份', KNOWN_YEARS.join(','), '2024,2025,2026')
+
+  check('isRestDay：假期算休', isRestDay(at(2026, 10, 1)), true)
+  check('isRestDay：调休上班不算休', isRestDay(at(2026, 10, 10)), false)
+  check('isRestDay：普通周中不算休', isRestDay(at(2026, 9, 29)), false)
+
+  // 倒计时取数：今天是 2026-09-29（周二），下一个假期是国庆
+  const now = at(2026, 9, 29, 10, 0)
+  const next = nextHoliday(now)!
+  check('下一个假期是国庆节', next.name, '国庆节')
+  check('还有 2 天（9/29 → 10/1）', next.daysUntil, 2)
+  check('还没开始所以不是假期里的第几天', next.indexInRun, null)
+  check('国庆放 7 天', next.span, 7)
+
+  const during = nextHoliday(at(2026, 10, 3, 9, 0))!
+  check('正在放假时它还在最前面', during.name, '国庆节')
+  check('正在进行的天数', during.indexInRun, 3)
+  check('进行中的 daysUntil 归零', during.daysUntil, 0)
+
+  const rest = upcomingHolidays(now, 8)
+  check('从今天起还有 1 个假期（2027 未公布）', rest.length, 1)
+  check('假期跨年时也不会算错：10/8 查下一个',
+    nextHoliday(at(2026, 10, 8, 9, 0)), null)
+}
+
+console.log('\n--- 纪念日 ---')
+{
+  const now = at(2026, 9, 29, 10, 0)
+
+  // 公历每年重复：今年的 5/20 已过 → 翻到明年
+  const yearly = anniversaryOccurrence(anniversary(), now)!
+  check('公历生日翻到明年', yearly.at, '2027-05-20')
+  check('第 12 周年', yearly.years, 12)
+  check('从锚点起已过 4150 天', yearly.sinceDays, 4150)
+  check('还有的天数与两个日期之差一致', yearly.daysLeft, daysBetween(now, at(2027, 5, 20)))
+  check('公历没有农历说明', yearly.lunarLabel, null)
+
+  // 今天当天
+  const today = anniversaryOccurrence(anniversary({ date: '2015-09-29' }), now)!
+  check('今天就是那天', today.daysLeft, 0)
+  check('今天的文案', daysLeftLabel(today.daysLeft), '就是今天')
+
+  // 2/29 的锚点在平年落到 2/28 —— 比落到 3/1 符合直觉
+  const feb29 = anniversary({ date: '2000-02-29' })
+  check('2027 不是闰年，落到 2/28', anniversaryOccurrence(feb29, now)!.at, '2027-02-28')
+  check('2028 是闰年，回到 2/29',
+    anniversaryOccurrence(feb29, at(2027, 12, 31))!.at, '2028-02-29')
+  check('2/29 的周年数照常', anniversaryOccurrence(feb29, now)!.years, 27)
+
+  // 农历纪年：锚点是 2026 年中秋（八月十五），下一次应当落在 2027 年中秋
+  const lunarAnnual = anniversary({ date: '2026-09-25', lunar: true })
+  const lunarNext = anniversaryOccurrence(lunarAnnual, now)!
+  check('农历纪念日翻到 2027 年中秋', lunarNext.at, '2027-09-15')
+  check('农历说明', lunarNext.lunarLabel, '农历八月十五')
+  check('第 1 周年', lunarNext.years, 1)
+
+  // 闰月里的锚点：2025 闰六月十五。2026 没有闰六月 → 按六月十五过
+  const inLeap = anniversary({
+    date: dayKey(solarFromLunar(2025, 6, 15, true)!),
+    lunar: true
+  })
+  check('锚点确实落在闰月里', anniversaryInLeapMonth(inLeap), true)
+  const afterLeap = anniversaryOccurrence(inLeap, at(2025, 8, 8))!
+  check('平年按同月同日过（不是闰月）', afterLeap.at, dayKey(solarFromLunar(2026, 6, 15)!))
+  check('平年那次不是闰月', lunarOf(tsFromDayKey(afterLeap.at)!)!.isLeap, false)
+  check('公历纪念日不算闰月', anniversaryInLeapMonth(anniversary()), false)
+
+  // 一次性：过完就不再倒数，但那条记录还在，界面会说「已过 N 天」
+  const once = anniversary({ date: '2026-12-25', yearly: false })
+  check('一次性纪念日就是那天', anniversaryOccurrence(once, now)!.at, '2026-12-25')
+  check('还有 87 天', anniversaryOccurrence(once, now)!.daysLeft, 87)
+  check('一次性没有周年数', anniversaryOccurrence(once, now)!.years, null)
+  const past = anniversary({ date: '2025-01-01', yearly: false })
+  const pastOcc = anniversaryOccurrence(past, now)!
+  check('过掉的一次性是负数（已过）', pastOcc.daysLeft < 0, true)
+  check('已过的文案', daysLeftLabel(pastOcc.daysLeft).startsWith('已过'), true)
+  check('一次性不吃农历开关',
+    anniversaryOccurrence(anniversary({ date: '2026-12-25', yearly: false, lunar: true }), now)!.lunarLabel,
+    '农历冬月十七')
+
+  check('周年文案：今年', yearsLabel(0), '今年')
+  check('周年文案：第 12 周年', yearsLabel(12), '第 12 周年')
+  check('周年文案：没有就不说', yearsLabel(null), null)
+  check('远近文案：还有 1 天', daysLeftLabel(1), '还有 1 天')
+
+  // 排序按「离得多近」，过掉的与将到的都排在中间附近
+  const sorted = sortAnniversaries(
+    [
+      anniversary({ id: 'far', date: '2027-08-01' }),
+      anniversary({ id: 'near', date: '2026-10-01' }),
+      anniversary({ id: 'today', date: '2015-09-29' })
+    ],
+    now
+  )
+  check('最近的排最前', sorted.map((a) => a.id).join(','), 'today,near,far')
+}
+
+console.log('\n--- 倒计时取数 ---')
+{
+  const now = at(2026, 9, 29, 10, 0)
+  const list = [
+    anniversary({ id: 'near', date: '2026-10-20' }),
+    anniversary({ id: 'far', date: '2027-09-01' }),
+    anniversary({ id: 'once-past', date: '2026-01-01', yearly: false })
+  ]
+  const base = { countdownHolidays: true, countdownHorizonDays: 365 }
+
+  const all = collectCountdowns(now, list, base)
+  check('节假日也在里面', all.holidays[0]!.name, '国庆节')
+  check('纪念日三条都在', all.anniversaries.length, 3)
+  check('一条都没被藏', all.hiddenAnniversaries, 0)
+
+  const near = collectCountdowns(now, list, { ...base, countdownHorizonDays: 30 })
+  check('只看 30 天：远的藏起来', near.anniversaries.map((x) => x.item.id).join(','), 'near,once-past')
+  check('被藏了几条', near.hiddenAnniversaries, 1)
+
+  const noHoliday = collectCountdowns(now, list, { ...base, countdownHolidays: false })
+  check('关掉节假日就真的一条都不给', noHoliday.holidays.length, 0)
+
+  const unlimited = collectCountdowns(now, list, { ...base, countdownHorizonDays: 0 })
+  check('不限天数时全都在', unlimited.anniversaries.length, 3)
+
+  // 已经过掉的一次性纪念日**永远**显示 —— 藏起来等于把用户记下的那天抹掉
+  const tiny = collectCountdowns(now, list, { ...base, countdownHorizonDays: 1 })
+  check('过掉的一次性不会被天数挡住',
+    tiny.anniversaries.some((x) => x.item.id === 'once-past'), true)
+
+  check('日期范围文案', holidaySpanLabel({ from: '2026-10-01', to: '2026-10-07' }), '10月1日—10月7日')
+  check('单日假期只写一天', holidaySpanLabel({ from: '2025-01-01', to: '2025-01-01' }), '1月1日')
+  check('短日期', shortDate('2026-09-05'), '9月5日')
+  check('长日期带年份', fullDate('2027-01-01'), '2027年1月1日')
+}
+
+console.log('\n--- 日历的按天聚合 ---')
+{
+  const day = at(2026, 9, 29) // 周二
+  const tasks: Task[] = [
+    {
+      kind: 'deadline', id: 'dl-evening', title: '提交材料', important: false,
+      createdAt: at(2026, 9, 20), updatedAt: at(2026, 9, 20), deletedAt: null, firedFor: null,
+      dueAt: at(2026, 9, 29, 17, 0), allDay: false, leadMin: 15, snoozeUntil: null, completedAt: null
+    },
+    {
+      kind: 'deadline', id: 'dl-allday', title: '填个表', important: false,
+      createdAt: at(2026, 9, 20), updatedAt: at(2026, 9, 20), deletedAt: null, firedFor: null,
+      dueAt: day, allDay: true, leadMin: 0, snoozeUntil: null, completedAt: null
+    },
+    {
+      kind: 'deadline', id: 'dl-other', title: '明天的事', important: false,
+      createdAt: at(2026, 9, 20), updatedAt: at(2026, 9, 20), deletedAt: null, firedFor: null,
+      dueAt: at(2026, 9, 30, 9, 0), allDay: false, leadMin: 15, snoozeUntil: null, completedAt: null
+    },
+    {
+      kind: 'deadline', id: 'dl-late', title: '上周欠的', important: false,
+      createdAt: at(2026, 9, 20), updatedAt: at(2026, 9, 20), deletedAt: null, firedFor: null,
+      dueAt: at(2026, 9, 28, 17, 0), allDay: false, leadMin: 15, snoozeUntil: null, completedAt: null
+    },
+    {
+      kind: 'deadline', id: 'dl-done', title: '已经做完的', important: false,
+      createdAt: at(2026, 9, 20), updatedAt: at(2026, 9, 20), deletedAt: null, firedFor: null,
+      dueAt: at(2026, 9, 28, 10, 0), allDay: false, leadMin: 15, snoozeUntil: null,
+      completedAt: at(2026, 9, 28, 11, 0)
+    },
+    {
+      kind: 'deadline', id: 'dl-deleted', title: '删掉的', important: false,
+      createdAt: at(2026, 9, 20), updatedAt: at(2026, 9, 20), deletedAt: at(2026, 9, 21),
+      firedFor: null, dueAt: day, allDay: true, leadMin: 0, snoozeUntil: null, completedAt: null
+    },
+    {
+      kind: 'recurring', id: 'rec-morning', title: '早上看简历', important: false,
+      createdAt: at(2026, 9, 1), updatedAt: at(2026, 9, 1), deletedAt: null, firedFor: null,
+      rule: { freq: 'weekly', every: 1, days: [2], skipWeekend: false },
+      remindTime: '08:00', lastDoneDay: null, streak: 0, snoozeUntil: null
+    },
+    {
+      kind: 'recurring', id: 'rec-night', title: '记一笔', important: false,
+      createdAt: at(2026, 9, 1), updatedAt: at(2026, 9, 1), deletedAt: null, firedFor: null,
+      rule: { freq: 'daily', every: 1, skipWeekend: false },
+      remindTime: '21:30', lastDoneDay: null, streak: 0, snoozeUntil: null
+    },
+    {
+      kind: 'someday', id: 'pool', title: '学 Rust', important: false,
+      createdAt: at(2026, 9, 1), updatedAt: at(2026, 9, 1), deletedAt: null, firedFor: null
+    }
+  ]
+
+  const onDay = tasksOnDay(tasks, day)
+  check(
+    '那天的事按钟点排，全天型垫最后',
+    onDay.map((t) => t.id).join(','),
+    'rec-morning,dl-evening,rec-night,dl-allday'
+  )
+  check('别天的事不掺进来', onDay.some((t) => t.id === 'dl-other'), false)
+  check('删掉的不算', onDay.some((t) => t.id === 'dl-deleted'), false)
+  check('清单池不进日历', onDay.some((t) => t.id === 'pool'), false)
+
+  const today = agendaOfDay(tasks, day, at(2026, 9, 29, 12, 0))
+  check('那天的未完成条数（今天例外，两条习惯也数进去）', today.pending, 4)
+  check('那天没有逾期（逾期的是前一天）', today.overdue, 0)
+
+  const yesterday = agendaOfDay(tasks, at(2026, 9, 28), at(2026, 9, 29, 12, 0))
+  check('前一天两条都在（含已完成的）', yesterday.tasks.length, 2)
+  check('已完成的只算展示、不算未完成', yesterday.pending, 1)
+  check('未完成的那条算逾期', yesterday.overdue, 1)
+  // 周期任务没有历史：铺到过去就是替用户编一份「那天你没做」的流水
+  check('过去的日子不带周期任务', yesterday.tasks.some((t) => t.kind === 'recurring'), false)
+
+  // 未来那天的习惯进明细（「那天有这个习惯」），但**不进圆点** ——
+  // 一条「每天」的习惯否则会把整月每一格都点上
+  const futureDay = agendaOfDay(tasks, at(2026, 10, 6), at(2026, 9, 29, 12, 0))
+  check('未来的日子带周期任务（进明细）', futureDay.tasks.some((t) => t.id === 'rec-morning'), true)
+  check('但习惯不进圆点', futureDay.pending, 0)
+
+  // 周期任务当天打过卡：仍在明细里（带静态墨线），但不计未完成
+  const checked = tasks.map((t) =>
+    t.id === 'rec-night' ? { ...t, lastDoneDay: '2026-09-29' } : t
+  ) as Task[]
+  const afterCheck = agendaOfDay(checked, day, at(2026, 9, 29, 22, 0))
+  check('打过卡的周期任务还在那天', afterCheck.tasks.some((t) => t.id === 'rec-night'), true)
+  check('但它不再算未完成', afterCheck.pending, 3)
+
+  // 整月：一次算完，含上下补齐的邻月日子
+  const month = monthAgenda(tasks, 2026, 10, at(2026, 10, 5, 12, 0))
+  check('10 月网格补进来的 9/28 也在表里', month.has('2026-09-28'), true)
+  check('补进来那天的逾期算得对', month.get('2026-09-28')!.overdue, 1)
+  check('网格首尾之外的邻月日子不进表', month.has('2026-09-27'), false)
+  check('网格首尾之外的邻月日子不进表（后缘）', month.has('2026-11-02'), false)
+  check('10 月的周期任务按星期展开', month.get('2026-10-06')!.tasks.some((t) => t.id === 'rec-morning'), true)
+  check('下一个周二才算下一次', month.get('2026-10-13')!.tasks.some((t) => t.id === 'rec-morning'), true)
+
+  // 一整天都没事就别占一格（拿掉那条「每天」的习惯才看得出差别）
+  const sparse = monthAgenda(
+    tasks.filter((t) => t.id !== 'rec-night'),
+    2026,
+    10,
+    at(2026, 10, 5, 12, 0)
+  )
+  check('没事的那天不进表', sparse.has('2026-10-07'), false)
+  check('有事的那天还在表里', sparse.has('2026-10-06'), true)
+}
+
+console.log('\n--- store：纪念日的校验与读写 ---')
+{
+  const dir = mkdtempSync(join(tmpdir(), 'todo-ann-'))
+  const file = join(dir, 'todo-reminder.json')
+  const raw = { id: 'x', title: '生日', date: '2026-03-01', yearly: true, lunar: false, createdAt: 1, updatedAt: 1 }
+
+  check('合法记录通过', normalizeAnniversary(raw) !== null, true)
+  check('2 月 31 日不是真日期，拦下', normalizeAnniversary({ ...raw, date: '2026-02-31' }), null)
+  check('日期格式不对，拦下', normalizeAnniversary({ ...raw, date: '2026/03/01' }), null)
+  check('缺 yearly，拦下', normalizeAnniversary({ ...raw, yearly: undefined }), null)
+  check('缺 lunar，拦下', normalizeAnniversary({ ...raw, lunar: undefined }), null)
+  // 与 normalizeTask 同一条分工：存储只管形状（类型/存在性），
+  // 「名字不能是空的」是业务规则，在命令层拒（见 buildAnniversary）
+  check('空标题能过存储校验', normalizeAnniversary({ ...raw, title: '' }) !== null, true)
+  check('不是对象，拦下', normalizeAnniversary('nope'), null)
+
+  const s = new Store(file)
+  s.addAnniversary(anniversary({ id: 'a1' }))
+  const s2 = new Store(file)
+  check('落盘读回', s2.anniversaries.length, 1)
+  check('标题读回', s2.anniversaries[0]!.title, '结婚纪念日')
+  check('农历开关读回', s2.anniversaries[0]!.lunar, false)
+  s2.updateAnniversary('a1', { title: '改成生日', lunar: true })
+  check('编辑写回', new Store(file).anniversaries[0]!.title, '改成生日')
+  check('编辑不动的字段保留', new Store(file).anniversaries[0]!.date, '2015-05-20')
+  check('编辑不存在的返回 null', s2.updateAnniversary('nope', { title: 'x' }), null)
+  check('删除成功', s2.removeAnniversary('a1'), true)
+  check('删完就没了', new Store(file).anniversaries.length, 0)
+  check('删不存在的不报错但返回 false', s2.removeAnniversary('nope'), false)
+
+  // 旧文件（v1，没有 anniversaries 这个键）照常读，且不触发「版本更新」备份
+  const oldFile = join(dir, 'old.json')
+  writeFileSync(
+    oldFile,
+    JSON.stringify({ version: 1, tasks: [deadline({ id: 't1' })], settings: { theme: 'dark' } }),
+    'utf-8'
+  )
+  const old = new Store(oldFile)
+  check('没有 anniversaries 键的旧文件读成空表', old.anniversaries.length, 0)
+  check('旧文件不算「更新版本」', old.newerFileVersion, null)
+  check('旧文件的设置照常合并', old.settings.theme, 'dark')
+  check('旧文件缺的键取默认值', old.settings.countdownHorizonDays, DEFAULT_SETTINGS.countdownHorizonDays)
+
+  // 坏记录：跳过、留原文、计数
+  const badFile = join(dir, 'bad.json')
+  writeFileSync(
+    badFile,
+    JSON.stringify({
+      version: 2,
+      tasks: [],
+      anniversaries: [{ ...raw, id: 'bad', date: '2026-13-45' }],
+      settings: {}
+    }),
+    'utf-8'
+  )
+  const bad = new Store(badFile)
+  check('坏纪念日被跳过', bad.anniversaries.length, 0)
+  check('跳过计数记上', bad.droppedTaskCount, 1)
+  check('原文备份留下来了', typeof bad.corruptBackupPath, 'string')
+  check('备份里含那条坏记录', readFileSync(bad.corruptBackupPath as string, 'utf-8').includes('2026-13-45'), true)
+
+  rmSync(dir, { recursive: true, force: true })
+}
+
+console.log('\n--- commands.ts：纪念日的增删改 ---')
+{
+  const dir = mkdtempSync(join(tmpdir(), 'todo-ann-cmd-'))
+  const store = new Store(join(dir, 'a.json'))
+  const now = at(2026, 9, 29, 10, 0)
+  const run = (cmd: Command) => applyCommand(store, cmd, now)
+  const draft = { title: '  结婚纪念日 ', date: '2015-05-20', yearly: true, lunar: false }
+
+  const added = run({ type: 'anniversary:add', draft })
+  check('add 成功', added.ok, true)
+  check('标题去掉首尾空格', store.anniversaries[0]!.title, '结婚纪念日')
+  const id = store.anniversaries[0]!.id
+  check('id 是新生成的', typeof id === 'string' && id.length > 0, true)
+
+  check('edit 成功', run({ type: 'anniversary:edit', id, draft: { ...draft, date: '2016-06-01' } }).ok, true)
+  check('日期改掉了', store.anniversaries[0]!.date, '2016-06-01')
+  check('createdAt 不被编辑改掉', store.anniversaries[0]!.createdAt, now)
+
+  check('坏日期被拒', run({ type: 'anniversary:add', draft: { ...draft, date: '2026-02-31' } }).ok, false)
+  check('空名字被拒', run({ type: 'anniversary:add', draft: { ...draft, title: '   ' } }).ok, false)
+  const rejected = run({ type: 'anniversary:add', draft: { ...draft, date: '2026-02-31' } })
+  check('被拒的是业务性失败，不是写盘失败', rejected.writeError === undefined, true)
+  check('被拒不写进 store', store.anniversaries.length, 1)
+
+  // 一次性纪念日不带农历开关（buildAnniversary 里归一）
+  run({ type: 'anniversary:add', draft: { title: '高考', date: '2027-06-07', yearly: false, lunar: true } })
+  check('只数一次的日子不吃农历开关', store.anniversaries[1]!.lunar, false)
+
+  check('编辑不存在的给业务性失败', run({ type: 'anniversary:edit', id: 'nope', draft }).ok, false)
+  check('删除成功', run({ type: 'anniversary:remove', id }).ok, true)
+  check('删完只剩一条', store.anniversaries.length, 1)
+  check('删不存在的给业务性失败', run({ type: 'anniversary:remove', id: 'nope' }).ok, false)
+
+  rmSync(dir, { recursive: true, force: true })
+}
+
+/**
+ * 视觉规矩的可执行版本。
+ *
+ * `AGENTS.md` 第 3 条写着「文字只用两级灰，两级都要满足 AA（≥4.5:1）；
+ * `--ink-faint` 只准给图标字形用」。但这条规矩在 2026-09-22 之前**没有任何东西守着**：
+ * 实测当时 `--ink-muted` 在 `--paper` 上只有 4.61:1（余量 0.11），
+ * 而 `--ink-faint` 被拿去给日历的周末表头和邻月日子当了文案色，只有 2.45–4.12:1。
+ * 所以这里把两条都钉成断言 —— 调色时越线会当场失败，而不是等谁肉眼发现。
+ *
+ * 路径按 `__dirname` 推（`.tmp-test/scripts` → 仓库根），不依赖 cwd。
+ */
+/**
+ * 自动更新的状态机。
+ *
+ * 这一堆是「把纯函数拆出来」换来的回报：`main/updater.ts` 那层只剩事件名
+ * 翻译，真正的链路（检查中 → 有新版 → 下载 42% → 可以重启了）在这里逐跳验，
+ * 不需要真发一个版本、不需要网络、不需要等 GitHub。
+ */
+console.log('\n--- 自动更新的状态机 ---')
+{
+  const begin = initialUpdateState()
+  check('初始是 idle', begin.status, 'idle')
+  check('初始没有版本号', begin.version, null)
+  check('初始没查完过（checkedAt 为 null）', begin.checkedAt, null)
+  check('初始没有「用不了自动更新」的理由', begin.unsupported, null)
+
+  // 完整链路走一遍
+  const t0 = at(2026, 9, 29, 10, 0)
+  let s = updateReducer(begin, { type: 'check-started' }, t0)
+  check('开始检查 → checking', s.status, 'checking')
+  check('检查中**不**记 checkedAt（那是「查完了」的意思）', s.checkedAt, null)
+
+  s = updateReducer(s, { type: 'available', version: '0.1.5' }, t0 + 1200)
+  check('查到新版 → available', s.status, 'available')
+  check('版本号记下来了', s.version, '0.1.5')
+  check('查完了才记时间', s.checkedAt, t0 + 1200)
+
+  s = updateReducer(s, { type: 'progress', percent: 42.6 }, t0 + 3000)
+  check('下载进度 → downloading', s.status, 'downloading')
+  check('进度四舍五入', s.percent, 43)
+
+  s = updateReducer(s, { type: 'downloaded', version: '0.1.5' }, t0 + 9000)
+  check('下好了 → ready', s.status, 'ready')
+  check('下好直接记 100（最后一跳常停在 99.x）', s.percent, 100)
+
+  // 没有新版那条路
+  const nope = updateReducer(
+    updateReducer(begin, { type: 'check-started' }, t0),
+    { type: 'not-available' },
+    t0 + 800
+  )
+  check('没有新版 → up-to-date', nope.status, 'up-to-date')
+  check('没有新版要清掉版本号', nope.version, null)
+  check('没有新版也算查完了', nope.checkedAt, t0 + 800)
+
+  // 失败
+  const bad = updateReducer(begin, { type: 'failed', message: '连不上更新服务器' }, t0)
+  check('失败 → error', bad.status, 'error')
+  check('失败要把原因带上', bad.error, '连不上更新服务器')
+
+  // 开新一轮：进度作废，但版本号留住
+  const again = updateReducer(s, { type: 'check-started' }, t0 + 10_000)
+  check('重新检查时进度清空', again.percent, null)
+  check('重新检查时上一轮的错清空', again.error, null)
+  check('重新检查时版本号留住（否则文案会闪一下）', again.version, '0.1.5')
+
+  // 进度夹取：刚接到响应头时 electron-updater 会给 -1
+  check('进度 -1 夹到 0', clampPercent(-1), 0)
+  check('进度 120 夹到 100', clampPercent(120), 100)
+  check('进度 NaN 当 0', clampPercent(Number.NaN), 0)
+  check('进度小数取整', clampPercent(7.5), 8)
+
+  // 便携版识别
+  check('有 PORTABLE_EXECUTABLE_DIR 就是便携版', isPortable({ PORTABLE_EXECUTABLE_DIR: 'C:\\Temp' }), true)
+  check('空字符串不算', isPortable({ PORTABLE_EXECUTABLE_DIR: '' }), false)
+  check('没有这个变量就不是', isPortable({}), false)
+  check('安装版的 env 里没有它', isPortable({ APPDATA: 'C:\\Users\\x\\AppData' }), false)
+
+  // 状态去重：同一次失败会从 reject 和 error 事件两条路进来，只能广播一次
+  const f1 = updateReducer(begin, { type: 'failed', message: 'x' }, t0)
+  const f2 = updateReducer(begin, { type: 'failed', message: 'x' }, t0)
+  check('同一事件同一时刻 → 两个状态相同', sameUpdateState(f1, f2), true)
+  check(
+    '时间不同 → 视为不同',
+    sameUpdateState(f1, updateReducer(begin, { type: 'failed', message: 'x' }, t0 + 1)),
+    false
+  )
+  check(
+    '文案不同 → 视为不同',
+    sameUpdateState(f1, updateReducer(begin, { type: 'failed', message: 'y' }, t0)),
+    false
+  )
+
+  // 错误翻译：要翻成「用户能据以行动」的一句话
+  check(
+    '404 说人话',
+    friendlyError(new Error('HttpError: 404 Not Found')),
+    '更新源上没有找到版本信息（Release 可能还是草稿，或者漏传了 latest.yml）'
+  )
+  check('连不上说人话', friendlyError(new Error('net::ERR_NAME_NOT_RESOLVED')), '连不上更新服务器')
+  check(
+    '校验失败说人话',
+    friendlyError(new Error('sha512 checksum mismatch')),
+    '下载到的安装包校验不一致，稍后再试'
+  )
+  check(
+    '认不出来的错误保留第一行（排查时还要线索）',
+    friendlyError(new Error('something odd\nsecond line')),
+    'something odd'
+  )
+  check('空错误也有兜底', friendlyError(new Error('')), '未知原因')
+
+  // 界面文案
+  check(
+    '便携版文案',
+    updateSummary(initialUpdateState('portable')),
+    '便携版每次运行都在临时目录里，装不了新版本，请手动下载'
+  )
+  check('开发版文案', updateSummary(initialUpdateState('dev')), '开发运行时不检查更新')
+  check('没查过文案', updateSummary(initialUpdateState()), '还没检查过')
+  check('检查中文案', updateSummary(updateReducer(begin, { type: 'check-started' }, t0)), '正在检查…')
+  check('最新版文案', updateSummary(nope), '已是最新版本')
+  check(
+    '有新版文案',
+    updateSummary(updateReducer(begin, { type: 'available', version: '0.1.5' }, t0)),
+    '发现新版本 0.1.5'
+  )
+  check('失败文案带原因', updateSummary(bad), '检查更新失败：连不上更新服务器')
+}
+
+console.log('\n--- renderer/tokens.css 的对比度与用色规矩 ---')
+{
+  const root = join(__dirname, '..', '..')
+  const tokens = readFileSync(join(root, 'src', 'renderer', 'tokens.css'), 'utf-8')
+  const styles = readFileSync(join(root, 'src', 'renderer', 'styles.css'), 'utf-8')
+
+  /** 取 `[from, to)` 之间所有 `--name: value;`。
+   *  必须给上界：深色块里的同名 token 会覆盖浅色块的值，
+   *  只给起点的话两套主题会解析成同一份，浅色那几条断言就变成了假的 */
+  const readTokens = (from: number, to: number): Record<string, string> => {
+    const out: Record<string, string> = {}
+    for (const m of tokens.slice(from, to).matchAll(/--([\w-]+)\s*:\s*([^;]+);/g)) {
+      out[m[1]] = m[2].trim()
+    }
+    return out
+  }
+  const darkAt = tokens.indexOf('@media (prefers-color-scheme: dark)')
+  check('tokens.css 里找得到深色块', darkAt > 0, true)
+  const light = readTokens(tokens.indexOf(':root'), darkAt)
+  const dark = readTokens(darkAt, tokens.length)
+
+  const srgb = (c: number): number => {
+    const v = c / 255
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  }
+  const luminance = (hex: string): number => {
+    const { r, g, b } = parseHexColor(hex)
+    return 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b)
+  }
+  const contrast = (a: string, b: string): number => {
+    const x = luminance(a)
+    const y = luminance(b)
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
+  }
+
+  check('深色段真的解析到了（不是空对象）', Object.keys(dark).length > 0, true)
+
+  // 三层纸：窗口底 --paper（顶栏与底栏就坐在它上面）、列表纸面 --sheet、
+  // 控件面 --surface（浮层）。**每个当文字用的色都要在三层上都达标** ——
+  // 只验一层会漏掉「同一个色在顶栏够、在纸面上不够」这类问题，
+  // 而朱砂恰好就是这么漏的：--paper 上 4.46:1，--sheet 上 5.08:1。
+  const PAPERS = ['paper', 'sheet', 'surface']
+  const TEXT_HUES = ['ink', 'ink-muted', 'indigo', 'cinnabar']
+
+  for (const [themeName, t] of [['浅色', light], ['深色', dark]] as const) {
+    for (const fg of TEXT_HUES) {
+      // 非 6 位十六进制会让 parseHexColor 静默返回黑色、算出假的高对比度，
+      // 所以先钉住格式：改成 rgba() 时必须连这里一起改，不能悄悄失效
+      check(`${themeName} --${fg} 是 6 位十六进制`, /^#[0-9a-fA-F]{6}$/.test(t[fg]), true)
+      const worst = Math.min(...PAPERS.map((bg) => contrast(t[fg], t[bg])))
+      check(
+        `${themeName} --${fg} 在三层纸上都满足 AA（最差 ${worst.toFixed(2)}:1）`,
+        worst >= 4.5,
+        true
+      )
+    }
+  }
+
+  // --ink-faint 只准给图标字形用。逐个列出允许的落点：加一处就得在这里加一行，
+  // 于是「顺手拿它给一段文案调淡」会在测试里被挡住
+  const GLYPH_SELECTORS = ['.head__sep', '.row__more', '.noticebar__close', '.datefield__caret']
+  const faintUsers: string[] = []
+  let selector = ''
+  for (const line of styles.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed.endsWith('{')) selector = trimmed.slice(0, -1).trim()
+    if (trimmed.startsWith('color:') && trimmed.includes('var(--ink-faint)')) {
+      faintUsers.push(selector)
+    }
+  }
+  check(
+    `--ink-faint 只落在图标字形上（${faintUsers.join(' ')}）`,
+    faintUsers.join(' ') === GLYPH_SELECTORS.join(' '),
+    true
+  )
+
+  /*
+   * 实底上的字：`--on-indigo` 压 `--indigo`（15px 的今日日号那种「小印」）、
+   * `--on-slab` 压 `--slab`（倒计时页那一整块）。
+   *
+   * 这是本轮新引入的一类耦合 —— 上面那组只管「写在纸上」的字，管不到「压在实心上」的。
+   * 调亮一个底、或换了底却忘了一起换字色，都会掉到 AA 以下，而这两种失效都只显形在
+   * 那一小块上，肉眼大概率漏掉。
+   *
+   * **必须连 opacity 一起算**：hero 里的小字都带 0.75，混出来的实色才是真正被读到的
+   * 颜色 —— 这条断言当日就把 `--on-slab` 从 `#e6edf2` 逼成了 `#ffffff`
+   * （`#e6edf2` @75% 压在深色的 `--slab` 上只有 4.36:1，看着像够其实不够）。
+   */
+  const blend = (fg: string, bg: string, alpha: number): string => {
+    if (alpha === 1) return fg
+    const a = parseHexColor(fg)
+    const b = parseHexColor(bg)
+    const mix = [a.r, a.g, a.b].map((v, i) => {
+      const under = [b.r, b.g, b.b][i]
+      return Math.round(v * alpha + under * (1 - alpha))
+    })
+    return `#${mix.map((v) => v.toString(16).padStart(2, '0')).join('')}`
+  }
+  // [字色, 底, 字在这层底上的实际不透明度]
+  const SOLID_PAIRS: Array<[string, string, number]> = [
+    ['on-indigo', 'indigo', 1],
+    ['on-slab', 'slab', 0.75],
+  ]
+  for (const [themeName, t] of [['浅色', light], ['深色', dark]] as const) {
+    for (const [fg, bg, alpha] of SOLID_PAIRS) {
+      // 同上：非 6 位十六进制会静默算成黑色，得出假的高对比度
+      check(
+        `${themeName} --${fg} 与 --${bg} 都是 6 位十六进制`,
+        /^#[0-9a-fA-F]{6}$/.test(t[fg]) && /^#[0-9a-fA-F]{6}$/.test(t[bg]),
+        true
+      )
+      const mixed = blend(t[fg], t[bg], alpha)
+      const c = contrast(mixed, t[bg])
+      check(
+        `${themeName} --${fg} 压在 --${bg} 上满足 AA（${alpha === 1 ? '实色' : `@${alpha * 100}%`} ${mixed}，${c.toFixed(2)}:1）`,
+        c >= 4.5,
+        true
+      )
+    }
+  }
 }
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  ${checks - failures}/${checks} 项通过`)

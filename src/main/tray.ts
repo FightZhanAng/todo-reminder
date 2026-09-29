@@ -1,9 +1,11 @@
 import { Menu, Tray } from 'electron'
 import { groupToday } from '../shared/group'
+import { nextHoliday } from '../shared/holiday'
 import { formatClock } from '../shared/time'
 import { trayIconClear, trayIconPending } from './icons'
 import type { Scheduler } from './scheduler'
 import type { Store } from './store'
+import type { OpenView } from '../shared/ipc'
 
 export interface TrayDeps {
   store: Store
@@ -11,6 +13,7 @@ export interface TrayDeps {
   onOpen: () => void
   onQuickAdd: () => void
   onSettings: () => void
+  onOpenView: (view: OpenView) => void
   onQuit: () => void
 }
 
@@ -62,9 +65,15 @@ export class TrayController {
 
   private buildMenu(): Menu {
     const paused = this.deps.scheduler.pausedUntil !== null
+    const holiday = nextHoliday(Date.now())
     return Menu.buildFromTemplate([
       { label: '打开待办', click: () => this.deps.onOpen() },
       { label: '快速添加', click: () => this.deps.onQuickAdd() },
+      { type: 'separator' },
+      // 日历与倒计时在这里也留个入口：它们是主窗口里的两个新视图，
+      // 光靠窗口里那两枚图标，托盘用户的鼠标得先进窗口再找
+      { label: '日历', click: () => this.deps.onOpenView('calendar') },
+      { label: holidayLabel(holiday), click: () => this.deps.onOpenView('countdown') },
       { type: 'separator' },
       {
         label: '暂停提醒',
@@ -98,4 +107,16 @@ function minutesUntilMidnight(): number {
   const now = new Date()
   const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
   return Math.max(1, Math.ceil((midnight.getTime() - now.getTime()) / 60_000))
+}
+
+/**
+ * 「倒计时 · 距国庆节 2 天」。
+ *
+ * 托盘菜单是纯文字的，多带这几粒字让菜单本身就回答了「下一个假还有多久」——
+ * 这正是用户点开托盘想看一眼的东西，不必为此打开窗口。
+ */
+function holidayLabel(holiday: ReturnType<typeof nextHoliday>): string {
+  if (holiday === null) return '倒计时'
+  if (holiday.indexInRun !== null) return `倒计时 · 正在放${holiday.name}`
+  return `倒计时 · 距${holiday.name} ${holiday.daysUntil} 天`
 }

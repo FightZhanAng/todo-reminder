@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react'
 import { hotkeyFromEvent, isValidHotkey } from '@shared/hotkey'
 import type { Settings } from '@shared/types'
+import { updateSummary, type UpdateState } from '@shared/update'
 import type { AppState } from '../useAppState'
 import { TimeField } from './TimeField'
 
@@ -13,9 +14,24 @@ const THEMES: { value: Settings['theme']; label: string }[] = [
 /** 推迟的常用档位。手填一个 7 分钟没有意义，给三个就够了 */
 const SNOOZE_STEPS = [5, 10, 30]
 
+/**
+ * 倒计时的显示范围。`0` = 不限。
+ *
+ * 给档位而不是给一个数字输入框：这是「我想看多远」的偏好，
+ * 没人会想填「247 天」。
+ */
+const HORIZON_STEPS: { value: number; label: string }[] = [
+  { value: 30, label: '一个月' },
+  { value: 90, label: '三个月' },
+  { value: 365, label: '一年' },
+  { value: 0, label: '不限' }
+]
+
 export function SettingsPanel({ state }: { state: AppState }): JSX.Element {
   const snapshot = state.snapshot!
   const s = snapshot.settings
+  // 更新状态整组来自 runtime（不落盘），下面每一处都读它
+  const u = snapshot.runtime.update
   const [capturing, setCapturing] = useState(false)
   const [hotkeyProblem, setHotkeyProblem] = useState<string | null>(null)
 
@@ -116,6 +132,47 @@ export function SettingsPanel({ state }: { state: AppState }): JSX.Element {
               ))}
             </span>
           </span>
+        </div>
+
+        <div className="group__label">倒计时</div>
+
+        <div className="field">
+          <span className="field__label">节假日</span>
+          <span className="field__control">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={s.countdownHolidays}
+                onChange={(e) => patch({ countdownHolidays: e.target.checked })}
+              />
+              在倒计时里显示法定节假日
+            </label>
+          </span>
+        </div>
+
+        <div className="field">
+          <span className="field__label">只看</span>
+          <span className="field__control field__control--row">
+            <span className="segmented">
+              {HORIZON_STEPS.map((step) => (
+                <button
+                  key={step.value}
+                  type="button"
+                  className={
+                    s.countdownHorizonDays === step.value
+                      ? 'segmented__item segmented__item--on'
+                      : 'segmented__item'
+                  }
+                  onClick={() => patch({ countdownHorizonDays: step.value })}
+                >
+                  {step.label}
+                </button>
+              ))}
+            </span>
+          </span>
+        </div>
+        <div className="field__hint">
+          更远的纪念日不列出来（已经过掉的那种永远会显示）。日历上的农历与休假标记不受这里影响。
         </div>
 
         <div className="group__label">免打扰</div>
@@ -308,20 +365,127 @@ export function SettingsPanel({ state }: { state: AppState }): JSX.Element {
               退出应用
             </button>
           </div>
-          {snapshot.runtime.corruptBackupPath !== null && (
-            <div className="field__hint field__hint--warn">
-              上次启动读到损坏的文件，已备份到 {snapshot.runtime.corruptBackupPath}
-            </div>
+          {backupWarning(snapshot.runtime) !== null && (
+            <div className="field__hint field__hint--warn">{backupWarning(snapshot.runtime)}</div>
           )}
         </div>
 
-        <div className="field field--stack">
-          <span className="field__label">版本</span>
+        <div className="group__label">更新</div>
+
+        <div className="field">
+          <span className="field__label">当前版本</span>
           <div className="field__hint mono">{snapshot.runtime.version}</div>
+        </div>
+
+        {u.unsupported === null && (
+          <div className="field">
+            <span className="field__label">自动更新</span>
+            <span className="field__control">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={s.autoUpdate}
+                  onChange={(e) => patch({ autoUpdate: e.target.checked })}
+                />
+                自动检查并下载
+              </label>
+            </span>
+          </div>
+        )}
+
+        <div className="field field--stack">
+          <span className="field__label">更新状态</span>
+          <div className="field__hint">{updateSummary(u)}</div>
+          <div className="page__foot">{updateActions(u)}</div>
         </div>
       </div>
     </div>
   )
+}
+
+/**
+ * 更新那一格该给哪个按钮。
+ *
+ * 抽成函数是因为它是个**穷举**：状态有八个，按钮只有四种。写在 JSX 里的
+ * if 链每加一个状态就会漏一个分支，而漏掉的表现是「那一格什么都没有」——
+ * 不报错，只是不能用。
+ *
+ * 便携版走 `open-download-page`（它装不了自动更新，见 shared/update.ts），
+ * 开发版什么都不给 —— 那里根本没有更新源可谈。
+ */
+function updateActions(u: UpdateState): JSX.Element | null {
+  if (u.unsupported === 'portable') {
+    return (
+      <button
+        type="button"
+        className="linkbutton"
+        onClick={() => void window.todo.window('open-download-page')}
+      >
+        打开发布页
+      </button>
+    )
+  }
+  if (u.unsupported === 'dev') return null
+
+  if (u.status === 'ready') {
+    return (
+      <button
+        type="button"
+        className="linkbutton"
+        onClick={() => void window.todo.installUpdate()}
+      >
+        重启并安装
+      </button>
+    )
+  }
+  if (u.status === 'available') {
+    return (
+      <button
+        type="button"
+        className="linkbutton"
+        onClick={() => void window.todo.downloadUpdate()}
+      >
+        下载
+      </button>
+    )
+  }
+  if (u.status === 'downloading') {
+    // 下载时不给按钮：这是个托盘应用，用户该能继续用它，
+    // 不该被一个「取消」诱导去点（取消了下次还得重下）
+    return null
+  }
+  return (
+    <button
+      type="button"
+      className="linkbutton"
+      disabled={u.status === 'checking'}
+      onClick={() => void window.todo.checkUpdate()}
+    >
+      {u.status === 'checking' ? '正在检查…' : '检查更新'}
+    </button>
+  )
+}
+
+/**
+ * 上次启动读到的问题数据，一句话说清「发生了什么 + 备份在哪」。
+ *
+ * 三种成因共用一个 `corruptBackupPath`（store.ts 里都由 `copyAside` 或损坏那一路写入），
+ * 所以判据是它们各自的标记字段，而不是那个路径 —— 按路径猜会把「版本更新」
+ * 说成「文件损坏」。
+ */
+function backupWarning(runtime: {
+  corruptBackupPath: string | null
+  droppedTaskCount: number
+  newerFileVersion: number | null
+}): string | null {
+  if (runtime.corruptBackupPath === null) return null
+  if (runtime.droppedTaskCount > 0) {
+    return `上次启动有 ${runtime.droppedTaskCount} 条记录形状不合法被跳过，原文备份在 ${runtime.corruptBackupPath}`
+  }
+  if (runtime.newerFileVersion !== null) {
+    return `数据文件来自更新的版本（v${runtime.newerFileVersion}），当前版本可能读不全；原文备份在 ${runtime.corruptBackupPath}`
+  }
+  return `上次启动读到损坏的文件，已备份到 ${runtime.corruptBackupPath}`
 }
 
 function clampInt(value: string, fallback: number, lo: number, hi: number): number {

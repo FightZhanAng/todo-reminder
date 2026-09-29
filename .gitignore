@@ -4,8 +4,20 @@ release/
 .tmp-test/
 .tmp-smoke/
 .tmp-icons/
+.tmp-shot/
+# 临时打包输出（想验证「换个输出目录会不会好」时用的，见 AGENTS.md 文件卫生一节）
+.tmp-pkg*/
 .spike/
 *.log
+
+# 截图产物（用 .workbuddy/tools/shot.cjs 拍的，随时可重新生成，见 AGENTS.md）
+.workbuddy/preview/
+
+# 会话记忆。仓库是 PUBLIC，这些是过程笔记，不进版本库
+.workbuddy/memory/
+
+# 工具留下的零字节临时文件（形如 _tmp_<pid>_<hash>）
+_tmp_*
 
 # superpowers 工作流产出的文档（本项目不使用，见 AGENTS.md）
 docs/superpowers/

@@ -14,6 +14,7 @@ import { Scheduler } from './scheduler'
 import { Store } from './store'
 import { applyTheme } from './theme'
 import { TrayController } from './tray'
+import { Updater } from './updater'
 
 /**
  * Windows 通知身份（AppUserModelID）。
@@ -116,6 +117,7 @@ let scheduler: Scheduler
 let notifier: Notifier
 let tray: TrayController
 let quickAdd: QuickAdd
+let updater: Updater
 
 let ctx: AppContext
 
@@ -193,6 +195,26 @@ if (!app.requestSingleInstanceLock()) {
         action: { label: '打开所在文件夹', windowAction: 'open-data-dir' },
         at: Date.now()
       })
+    } else if (store.droppedTaskCount > 0) {
+      // 语法合法、字段半截的记录会被深校验拦下（见 store.ts 的 normalizeTask）。
+      // 拦下不等于可以不出声 —— 静默少几条任务比报错更让人困惑
+      notices.raise({
+        id: 'tasks-dropped',
+        level: 'warn',
+        text: `${store.droppedTaskCount} 条记录形状不合法，已跳过；原文备份在 ${store.corruptBackupPath}`,
+        action: { label: '打开所在文件夹', windowAction: 'open-data-dir' },
+        at: Date.now()
+      })
+    } else if (store.newerFileVersion !== null) {
+      // 装过更新的版本又退回来。改动前已经备份（store.ts 的 copyAside），
+      // 但要让人知道：这个版本可能读不全那份数据
+      notices.raise({
+        id: 'file-too-new',
+        level: 'warn',
+        text: `数据文件来自更新的版本（v${store.newerFileVersion}），当前版本可能读不全；原文已备份到 ${store.corruptBackupPath}`,
+        action: { label: '打开所在文件夹', windowAction: 'open-data-dir' },
+        at: Date.now()
+      })
     }
 
     // 主题在启动时先对齐一次 —— 设置有可能被改在别处
@@ -227,6 +249,15 @@ if (!app.requestSingleInstanceLock()) {
 
     quickAdd = createQuickAdd()
 
+    updater = new Updater({
+      // 状态一变就广播。这条和下面的 raiseNotice 同型：Updater 自己
+      // 不认识 ctx，由这里把广播注进去
+      onChange: () => broadcast(ctx),
+      // 现读设置，而不是把值传进来 —— 传进来的那份会在用户关掉开关之后
+      // 继续按旧值检查
+      autoUpdateEnabled: () => store.settings.autoUpdate
+    })
+
     const raiseNotice = (notice: Notice): void => {
       notices.raise(notice)
       broadcast(ctx)
@@ -247,6 +278,7 @@ if (!app.requestSingleInstanceLock()) {
       onOpen: () => showMainWindow(),
       onQuickAdd: () => quickAdd.show(),
       onSettings: () => openMain('settings', null),
+      onOpenView: (view) => openMain(view, null),
       onQuit: () => {
         scheduler.stop()
         tray.destroy()
@@ -281,12 +313,16 @@ if (!app.requestSingleInstanceLock()) {
             path: process.execPath
           })
         }
+        // 关掉开关时这一步不只是「下次不查」，还要把**已经排上**的那个定时器
+        // 撤掉 —— 漏了它，用户关掉开关之后的 6 小时里它还会再查一次
+        if (cmd.patch.autoUpdate !== undefined) updater.syncSchedule()
         // 注意这里**没有** hotkey 的分支：快捷键走 IPC.setHotkey，
         // 因为那条路要求先试注册、成功才写设置
       },
       afterPauseChange: () => tray.refresh(),
       setHotkey: (hotkey) => quickAdd.setHotkey(hotkey),
-      quickAdd: { hide: () => quickAdd.hide() }
+      quickAdd: { hide: () => quickAdd.hide() },
+      updater
     }
 
     registerIpc(ctx)
@@ -303,12 +339,17 @@ if (!app.requestSingleInstanceLock()) {
 
     scheduler.start()
 
+    // 自动检查的排程。放在装配之后：它要读设置（store 那时已就绪），
+    // 而第一次检查排在 20 秒后 —— 届时 ctx 早就装配完了
+    updater.syncSchedule()
+
     // 托盘常驻，不跟随窗口关闭退出
     app.on('window-all-closed', () => undefined)
   })
 
   app.on('before-quit', () => {
     scheduler?.stop()
+    updater?.stop()
     // 热键要解绑：不解绑的话进程虽然退了，组合键在系统里还是被占着
     quickAdd?.destroy()
   })

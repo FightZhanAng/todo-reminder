@@ -1,7 +1,8 @@
 import { actionPatch, type TaskAction } from './actions'
+import { tsFromDayKey } from './calendar'
 import { atTimeOfDay, startOfDay } from './time'
 import type {
-  DeadlineTask, RecurrenceRule, RecurringTask, Settings, SomedayTask, Task, TaskPatch
+  Anniversary, DeadlineTask, RecurrenceRule, RecurringTask, Settings, SomedayTask, Task, TaskPatch
 } from './types'
 
 export type TaskKind = 'deadline' | 'recurring' | 'someday'
@@ -38,6 +39,21 @@ export type TaskDraft =
     }
   | { kind: 'someday'; title: string; note?: string; important: boolean }
 
+/**
+ * 纪念日的表单形状。日期是 'YYYY-MM-DD' 而不是时间戳 —— 界面手里就是
+ * 日期控件那串字符，让它自己转时间戳等于把「这一天必须是真实存在的一天」
+ * 这条校验复制到界面里（`tsFromDayKey` 已经在 `buildAnniversary` 里守着）。
+ */
+export interface AnniversaryDraft {
+  title: string
+  /** 'YYYY-MM-DD' */
+  date: string
+  /** 每年都数 */
+  yearly: boolean
+  /** 按农历月日数 */
+  lunar: boolean
+}
+
 export type Command =
   | { type: 'task:create'; draft: TaskDraft }
   | { type: 'task:edit'; id: string; draft: TaskDraft }
@@ -48,15 +64,25 @@ export type Command =
   | { type: 'task:remove'; id: string }
   | { type: 'task:restore'; id: string }
   | { type: 'task:toToday'; id: string }
+  | { type: 'anniversary:add'; draft: AnniversaryDraft }
+  | { type: 'anniversary:edit'; id: string; draft: AnniversaryDraft }
+  | { type: 'anniversary:remove'; id: string }
   | { type: 'settings:patch'; patch: Partial<Settings> }
 
 /** 命令层需要的最小 store 面 —— 传真实的 Store 也行，这样才有无头测试的价值 */
 export interface CommandStore {
   readonly tasks: readonly Task[]
+  readonly anniversaries: readonly Anniversary[]
   readonly settings: Settings
   addTask(task: Task): unknown
   updateTask(id: string, patch: TaskPatch): unknown
   replaceTask(task: Task): Task | null
+  addAnniversary(item: Anniversary): unknown
+  updateAnniversary(
+    id: string,
+    patch: Partial<Pick<Anniversary, 'title' | 'date' | 'yearly' | 'lunar'>>
+  ): Anniversary | null
+  removeAnniversary(id: string): boolean
   patchSettings(patch: Partial<Settings>): unknown
   newId(): string
 }
@@ -139,6 +165,35 @@ export function buildTask(
       }
       return note === undefined || note === '' ? task : { ...task, note }
     }
+  }
+}
+
+/**
+ * 用 draft 组装一条纪念日。
+ *
+ * `createdAt` 与任务那边同理由调用方传入 —— 编辑时它是列表排序的稳定依据。
+ * 日期合法性的判据与持久化校验**共用 `tsFromDayKey`**：那条「像日期但不是
+ * 日期」的坑（`2026-02-31` 会静默滚成 3 月 3 日）只在一处挡，
+ * 不要在这里再写一遍正则。
+ */
+export function buildAnniversary(
+  draft: AnniversaryDraft,
+  now: number,
+  id: string,
+  createdAt: number
+): Anniversary | null {
+  if (tsFromDayKey(draft.date) === null) return null
+  const title = draft.title.trim()
+  if (title === '') return null
+  return {
+    id,
+    title,
+    date: draft.date,
+    yearly: draft.yearly,
+    // 只数一次的日子没有「按什么历」这一说，存 false 免得将来切换语义时被误读
+    lunar: draft.yearly ? draft.lunar : false,
+    createdAt,
+    updatedAt: now
   }
 }
 
@@ -267,6 +322,38 @@ function route(store: CommandStore, cmd: Command, now: number): CommandResult {
       // 渲染层确实是这么做的（`{ ...s.quietHours!, start: v }`），
       // 在这里再深合并一次只会让人以为可以传半截对象。
       store.patchSettings(cmd.patch)
+      return { ok: true }
+    }
+
+    case 'anniversary:add': {
+      const item = buildAnniversary(cmd.draft, now, store.newId(), now)
+      if (item === null) return invalid('纪念日的名字和日期都得填对')
+      store.addAnniversary(item)
+      return { ok: true }
+    }
+
+    case 'anniversary:edit': {
+      const old = store.anniversaries.find((a) => a.id === cmd.id)
+      if (!old) return invalid(`纪念日不存在：${cmd.id}`)
+      // 走 buildAnniversary 再 update，而不是直接把 draft 打进去：
+      // 「标题去空格、日期必须真实存在、非每年重复时不带农历」这三条
+      // 只在那一处判断，编辑路径照抄一遍迟早漏一条
+      const next = buildAnniversary(cmd.draft, now, old.id, old.createdAt)
+      if (next === null) return invalid('纪念日的名字和日期都得填对')
+      if (store.updateAnniversary(old.id, {
+        title: next.title,
+        date: next.date,
+        yearly: next.yearly,
+        lunar: next.lunar
+      }) === null) {
+        return invalid(`纪念日不存在：${cmd.id}`)
+      }
+      return { ok: true }
+    }
+
+    case 'anniversary:remove': {
+      if (!store.anniversaries.some((a) => a.id === cmd.id)) return invalid(`纪念日不存在：${cmd.id}`)
+      store.removeAnniversary(cmd.id)
       return { ok: true }
     }
   }

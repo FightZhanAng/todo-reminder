@@ -63,6 +63,27 @@ export interface SomedayTask extends TaskBase {
 
 export type Task = DeadlineTask | RecurringTask | SomedayTask
 
+/**
+ * 纪念日 —— 一年一次要数的那个日子（生日、结婚纪念日…）。
+ *
+ * **刻意不是一种 `Task`**：待办的每一种都属于「要做的事」，共享着
+ * `completedAt` / `firedFor` / 提醒时刻那一整套字段；纪念日一个都不需要，
+ * 它只有「离那天还有多久」。塞进 `Task` 的代价是每个关于待办的分支
+ * 都要先排除它一次（见 `shared/anniversary.ts` 顶部的说明）。
+ */
+export interface Anniversary {
+  id: string
+  title: string
+  /** 锚点那一天，'YYYY-MM-DD'。农历纪念日存的是公历锚点，农历月日由它推出 */
+  date: string
+  /** true = 每年都数；false = 只数这一天 */
+  yearly: boolean
+  /** true = 按农历月日重复（农历生日），false = 按公历月日 */
+  lunar: boolean
+  createdAt: number
+  updatedAt: number
+}
+
 /** 会提醒的任务类型。清单池不在其中 */
 export type RemindableTask = DeadlineTask | RecurringTask
 
@@ -101,10 +122,22 @@ export interface Settings {
   theme: 'auto' | 'light' | 'dark'
   /** 主窗口浮在所有窗口之上 —— 托盘常驻时怕它被别的窗口压住 */
   alwaysOnTop: boolean
+  /** 倒计时页里显示法定节假日 */
+  countdownHolidays: boolean
+  /** 倒计时只显示这么多天以内的；0 = 不限 */
+  countdownHorizonDays: number
+  /**
+   * 自动检查并在后台下载更新。
+   *
+   * 关掉之后**只剩手动**：设置页那颗「检查更新」照旧能点，但应用不再
+   * 自己联网。给「不想让它偷跑流量」留的口子。
+   */
+  autoUpdate: boolean
 }
 
 export interface Persisted {
   version: number
   tasks: Task[]
+  anniversaries: Anniversary[]
   settings: Settings
 }

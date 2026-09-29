@@ -31,16 +31,6 @@ export class NoticeCenter {
     this.items.delete(id)
   }
 
-  /** 条件不再成立时收回（例如数据文件已重新读好）。顺带清掉"已关闭"标记，让下次还能显示 */
-  clear(id: NoticeId): void {
-    this.items.delete(id)
-    this.dismissed.delete(id)
-  }
-
-  has(id: NoticeId): boolean {
-    return this.items.has(id) && !this.dismissed.has(id)
-  }
-
   /** 按严重度排序（error 在前），同级别按时间新的在前 */
   list(): Notice[] {
     return [...this.items.values()]

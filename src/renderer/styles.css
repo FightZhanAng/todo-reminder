@@ -818,6 +818,11 @@ body,
   box-shadow: var(--shadow-pop);
 }
 
+/* 「这次没成功」。用朱砂而不是再加一个新色 —— 这张界面上红只有一个意思 */
+.flash__inner--error {
+  background: var(--cinnabar);
+}
+
 /* ---- popover 菜单 ---- */
 
 .rowmenu {
@@ -1004,9 +1009,11 @@ body,
   color: var(--ink-muted);
 }
 
-/* 周末那两列淡一档 —— 提醒类应用里它们本来就该被一眼分开 */
+/* 周末那两列**不再单独调淡**：第 3 条规矩只给文字两级灰，而 --ink-faint
+   （浅色 2.80:1 / 深色 3.83:1）连 AA 都不到，它只准给图标字形用。
+   周末在哪两列由列序本身就读得出来，不值得为它破一次对比度。 */
 .cal__dow--rest {
-  color: var(--ink-faint);
+  color: var(--ink-muted);
 }
 
 .cal__grid {
@@ -1030,9 +1037,11 @@ body,
   color: var(--indigo);
 }
 
-/* 邻月补进来的日子：点得动，只是不抢眼 */
+/* 邻月补进来的日子：点得动，只是不抢眼。
+   淡一档用 --ink-muted 而不是 --ink-faint —— 它是**文案**（数字），
+   而 --ink-faint 达不到 AA。与本月日子的 --ink 相比仍然明显更轻 */
 .cal__cell--out {
-  color: var(--ink-faint);
+  color: var(--ink-muted);
 }
 
 /* 今天用一圈细环，不填色 —— 填色是「选中」的语义，两者不能混 */
@@ -1276,9 +1285,11 @@ body,
   color: var(--sheet);
 }
 
-/* overflow:hidden 会切掉外翻的焦点环，往回缩一格 */
+/* overflow:hidden 会切掉外翻的焦点环，往回缩一格。
+   日历格子也得缩：相邻格子只差 1px，外翻的环会压到隔壁那天上 */
 .segmented__item:focus-visible,
-.daygrid__item:focus-visible {
+.daygrid__item:focus-visible,
+.monthcell:focus-visible {
   outline-offset: -2px;
 }
 
@@ -1453,6 +1464,509 @@ body,
 
 .bottombar__danger:hover {
   text-decoration: underline;
+}
+
+/* ---- 日历页 ---- */
+/*
+ * 和浮层里那张月历（`.cal`，230px 宽、只用来挑一天）**不是一套东西**：
+ * 这里的格子要装下徽标、农历和圆点，所以一屏 396px 宽、格子 52px 高。
+ * 两者共用的是 `.cal__head / .cal__dows / .cal__nav` 这几个外壳，
+ * 格子的样式分开写 —— 混在一起的话，改浮层会把日历页也拽歪。
+ */
+
+.monthgrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.monthcell {
+  position: relative;
+  /* 自己成一个层叠上下文：下面休假那条用 z-index:-1 的伪元素把底色铺到
+     相邻格子上去，不隔离的话它会一路漏到 .page__body 的底下、整条色带消失 */
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  height: 52px;
+  padding: 3px 4px 4px;
+  border-radius: 2px;
+  text-align: left;
+  transition:
+    background-color 100ms ease,
+    box-shadow 100ms ease;
+}
+
+/* hover 用**框**不用底色。
+   格子现在是有底色的（休假 / 调休），拿 `--hover` 去盖会把「那天休假」
+   这个信息当场擦掉 —— 鼠标划过去的时候最不该丢的恰恰是它。
+   框走 `outline` 而不是 `inset box-shadow`：休假那格的底色画在 z-index:-1
+   的伪元素上，而 inset 阴影和背景同属一层，会被它盖住。
+   outline 永远画在最上面，也不参与布局（格子只有 1px 缝，外扩的环会压到隔壁那天） */
+.monthcell:hover {
+  outline: 1px solid var(--rule-strong);
+  outline-offset: -1px;
+}
+
+/*
+ * 休假 = 给这一天盖一方印。
+ *
+ * 原来只是一个 10px 描边的「休」字，而格子本身和工作日一模一样 ——
+ * 一整屏 42 个格子扫下来，那 9 天春节和随便一个周二没有任何区别。
+ * 现在整格填淡靛：一个月的假期本来就是一串连着的日子，**底色连起来**
+ * 才看得见「这一整段是假」，小徽标只说得清单格、说不清段落。
+ *
+ * 底色画在 `::after` 上、左右各外扩半像素，是为了把网格那 1px 的缝盖住：
+ * 缝留着的话，九天连休读起来是一条虚线而不是一条色带。
+ * 外扩只有半像素，落在普通格子上只是一道抗锯齿的软边，看不出来。
+ */
+.monthcell--rest::after {
+  content: '';
+  position: absolute;
+  inset: 0 -0.5px;
+  z-index: -1;
+  border-radius: 2px;
+  background: var(--indigo-wash);
+}
+
+/*
+ * 调休上班 = 这天被划上斜线。
+ * 45° 细纹是「本该休息却被划掉」最省字的说法，而且它是**纹理**不是颜色 ——
+ * 这张月历的颜色预算全给了「休假 / 已经晚了」两件事，没有第三件事的位置。
+ */
+.monthcell--work {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--stripe) 0 1px,
+    transparent 1px 5px
+  );
+}
+
+/*
+ * 有逾期未完成的格子：左边一道朱砂。
+ *
+ * 不给整格填色 —— 假期里一样会欠着账，两种底色会互相盖掉，而被盖掉的那个
+ * 恰好是更需要看见的。左边这一笔和看板上那根刻度轴是同一套语言：
+ * 都是从边上**伸出来的一笔**，而不是一块铺满的背景。
+ */
+.monthcell--late::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--cinnabar);
+}
+
+/*
+ * 选中的格子**不填墨**（浮层里的 `.cal__cell--on` 是填墨的）。
+ * 这里格子里还装着徽标、底色与圆点，填了墨它们全得反过来画一遍。
+ * 用 2px 实靛框：它压在「休假底」和「调休纹」上都读得出来，而原先那圈
+ * 30% 的细靛线在一格有色底的格子上基本看不见 —— 点完不知道选中的是哪个。
+ *
+ * 和键盘焦点环长得一样是有意的：两者说的是同一件事（这一格是当前格），
+ * 一个来自鼠标、一个来自 Tab。这里不硬造第二种说法。
+ */
+.monthcell--on,
+.monthcell--on:hover {
+  outline: 2px solid var(--indigo);
+  outline-offset: -2px;
+}
+
+.monthcell__top {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 13px;
+}
+
+.monthcell__day {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink);
+}
+
+/* 邻月补进来的日子：点得动，只是不抢眼（--ink-muted 而不是 --ink-faint，
+   后者连 AA 都不到，只准给图标字形用） */
+.monthcell--out .monthcell__day {
+  color: var(--ink-muted);
+}
+
+/* 休假那天的日号也染靛蓝：底色说「这段放假」，字色说「就是这天」 */
+.monthcell--rest .monthcell__day {
+  color: var(--indigo);
+  font-weight: 600;
+}
+
+/* 调休要上班 —— 日号加粗，和斜纹一起把「今天不是假期」说死 */
+.monthcell--work .monthcell__day {
+  font-weight: 700;
+}
+
+/*
+ * 今天 = 日号上盖一枚实心靛蓝印。**放在最后**：它要压过
+ * 上面那几条日号染色（休假 / 调休 / 邻月），否则今天恰好是个调休周六时
+ * 就会被盖掉，而它恰恰是打开日历第一个要找的位置。
+ *
+ * 和「选中」不打架：今天是一个**点**，选中是一个**框**，两者可以同时出现。
+ */
+.monthcell--today .monthcell__day {
+  min-width: 15px;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background: var(--indigo);
+  color: var(--on-indigo);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* 休 / 班。**去掉外框** —— 底色（休）和斜纹（班）已经把这一格围住了，
+   再加一圈描边就成了两层框。字只负责把底色没说清的那半句补上 */
+.monthcell__badge {
+  flex: none;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 600;
+  color: var(--indigo);
+}
+
+.monthcell__badge--work {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* 农历日 / 节气 / 节日。10px 是这条能读清的下限，
+   再小中文就糊了 —— 而它下面还有一行圆点要放 */
+.monthcell__label {
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-muted);
+}
+
+/* 节气是这一天**真的有节点**（立春、清明、冬至），和「初七」这种纯编号不同。
+   染成靛蓝：它和假期、和「快到了」是同一类信息 —— 值得记一笔的日子。
+   底色留给休假，所以这条只加字色和字重，不再叠一层背景 */
+.monthcell__label--term {
+  color: var(--indigo);
+  font-weight: 600;
+}
+
+/* 邻月补进来的那一格：连节气也压回 muted —— 它不属于眼前这个月 */
+.monthcell--out .monthcell__label {
+  color: var(--ink-muted);
+}
+
+/* 休假那天的农历文字**升一级灰**。
+   不是审美选择：底色一深，`--ink-muted` 就掉到 4.5:1 以下了（浅色主题的
+   `--paper` 上只剩 5.0 的余量，任何一点底色都会吃掉它）。这条有测试守着 */
+.monthcell--rest .monthcell__label {
+  color: var(--ink);
+}
+
+/* 但假日里的节气要保住靛蓝：立春正好落在春节里（2026 就是），
+   那天的「立春」比「休」更值得看一眼。所以这条排在 `--rest` 后面 */
+.monthcell--rest .monthcell__label--term {
+  color: var(--indigo);
+}
+
+.monthcell__dots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: auto;
+  min-height: 5px;
+}
+
+.monthdot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--indigo);
+}
+
+/* 有逾期的任务 → 朱砂。这里红的意思仍然是「已经晚了」，没有新语义 */
+.monthcell__dots[data-late='1'] .monthdot {
+  background: var(--cinnabar);
+}
+
+.monthcell__more {
+  margin-left: 1px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 9.5px;
+  line-height: 1;
+  color: var(--ink-muted);
+}
+
+/* 「这一年没有休假数据」之类的一句实话。说事实，不道歉 */
+.cal__note {
+  margin-top: 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.cal__note-link {
+  margin-left: 6px;
+}
+
+/*
+ * 选中那天的明细。
+ *
+ * 铺一层 `--sheet`（比窗口纸 `--paper` 亮一档）而不是只画一条发丝线：
+ * 整页原来是「月历 + 一条线 + 一堆小字」的一根柱子，看不出下面这段
+ * 是**另一个东西**。一张纸压在工作台上，正好也是这本账的口气。
+ * 深色主题同理（--sheet 比 --paper 亮一档），不用单独处理。
+ */
+.daycard {
+  margin-top: 12px;
+  padding: 12px 12px 13px;
+  border-radius: var(--radius);
+  background: var(--sheet);
+}
+
+.daycard__head {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.daycard__line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+}
+
+/* 16px 是宋体的下限（再小就露点阵感），也是「这一天」该有的分量 */
+.daycard__date {
+  font-family: var(--font-display);
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
+
+.daycard__dow {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+/* 「春节 第 3/9 天」「调休上班 · 为春节」这类附注。
+   填淡靛底、去掉描边：它是个**章**，不是个按钮 */
+.daycard__chip {
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--indigo-wash);
+  font-size: 10.5px;
+  color: var(--indigo);
+}
+
+.daycard__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.daycard__empty {
+  padding: 14px 0;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.daycard__foot {
+  margin-top: 8px;
+}
+
+.daycard__add {
+  padding: 4px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--ink-muted);
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.daycard__add:hover {
+  border-color: var(--indigo);
+  color: var(--indigo);
+  background: var(--indigo-soft);
+}
+
+/* ---- 倒计时页 ---- */
+
+/*
+ * 最近的假期 —— 这一屏唯一的一块实心靛蓝。
+ *
+ * 原来它只有一条底部的发丝线，于是「还有 2 天」这屏最重要的信息
+ * 长成了和下面每一行一样的白底小字。整块靛蓝是这张界面上最重的底色，
+ * 只给「最近的那个日子」用一份，一天比一天近的那个数字才接得住这份重量。
+ *
+ * 用靛蓝不用墨：靛蓝在这里本来就是「快到了」，而墨色实心块全局只有两处
+ * （顶栏的「+」和表单的提交钮），再多一块就把那两处压没了。
+ *
+ * 底和字取 `--slab` / `--on-slab`，不取 `--indigo` / `--on-indigo`：后一对是给
+ * 「一小块」调的 —— 15px 的今日日号、药丸大的日期牌，面积小、深色下亮一点反而
+ * 看得清。这里是 100×150 的整块，深色的 `--indigo`（#86b0d4）铺满一屏会晃眼，
+ * 而这个应用夜里也开着。所以大面积单开一对：底压到中靛，字改成一色的白
+ * （`--indigo` 明暗两套相反、`--slab` 两套都偏深，所以 `--on-slab` 不必跟着反过来）。
+ * 面积决定用哪一对，不看语义 —— 语义上它们都是「靛蓝」。
+ */
+.hero {
+  margin-top: 2px;
+  padding: 13px 14px 14px;
+  border-radius: var(--radius);
+  background: var(--slab);
+  color: var(--on-slab);
+}
+
+.hero__label {
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  color: var(--on-slab);
+  opacity: 0.75;
+}
+
+.hero__name {
+  margin-top: 5px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.hero__days {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.hero__num {
+  font-size: 34px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--on-slab);
+}
+
+.hero__unit {
+  font-size: 12px;
+  color: var(--on-slab);
+  opacity: 0.75;
+}
+
+.hero__sub {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--on-slab);
+  opacity: 0.75;
+}
+
+/* 假期与纪念日共用的一行。一个可点（改）、一个不可点（节假日是抄来的，
+   改不了），所以点击区单独一层 `.crow__hit` */
+.crow {
+  border-bottom: 1px solid var(--rule);
+}
+
+.crow--static {
+  padding: 8px 0;
+}
+
+.crow__hit {
+  display: block;
+  width: 100%;
+  padding: 8px 0;
+  text-align: left;
+}
+
+.crow__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.crow__title {
+  overflow: hidden;
+  font-size: 13.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.crow__hit:hover .crow__title {
+  color: var(--indigo);
+}
+
+/*
+ * 倒数中的天数 —— 这一页的**节奏器**。
+ *
+ * 给每一行同一个淡靛块、右端对齐，一列扫下来就是「离那天还有多远」的刻度；
+ * 原先所有数字都是同色的 12px 小字，混在标题里，一行一行读过去没有任何抓手。
+ * 块而不是满圆角胶囊：这张界面的圆角只有 `--radius` 一档（3px），
+ * 满圆会是第三套形状语言。
+ *
+ * 到了那天换成实心靛蓝（今天不是「晚了」，不能借朱砂）。
+ */
+.crow__days {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--radius);
+  background: var(--indigo-wash);
+  font-size: 11.5px;
+  color: var(--indigo);
+}
+
+.crow__days[data-today='1'] {
+  background: var(--indigo);
+  color: var(--on-indigo);
+  font-weight: 600;
+}
+
+.crow__sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+/* 加 / 改纪念日的表单。用发丝线分块，不做卡片 ——
+   这张界面上没有一个带底色的盒子（除了两枚实心按钮） */
+.annform {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.annform__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 0 2px;
+}
+
+.annform__title {
+  font-size: 12px;
+}
+
+.annform__foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+/* 页中间的空状态：`.empty` 那 72px 的顶部留白是给整屏空的看板用的，
+   这里上面还有节假日那一段，不能那么奢侈 */
+.empty--tight {
+  padding: 20px 0 22px;
+  font-size: 16px;
 }
 
 /* ---- 快速添加小窗（无边框窗口，整页就是它）---- */

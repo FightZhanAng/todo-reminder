@@ -28,7 +28,10 @@ const SECTIONS: { section: keyof TodayGroups; label: string }[] = [
 /** 月份写成汉字（CN_MONTHS）在 shared/calendar.ts —— 日历控件也用同一份 */
 
 export function Board({ state }: { state: AppState }): JSX.Element {
-  const { tasks, now, snapshot, focusTaskId } = state
+  // 回调单独取出来：`state` 是每轮渲染新建的对象字面量（useAppState 的返回值），
+  // 把它放进下面 onKeyDown 的依赖里会让监听器每轮都摘掉重挂。
+  // 这几个都是 useCallback 的稳定引用（useAppState.ts 里依赖为空或稳定）。
+  const { tasks, now, snapshot, focusTaskId, go, run, complete, remove } = state
   const groups = useMemo(
     () => groupToday([...tasks], now),
     [tasks, now]
@@ -90,7 +93,7 @@ export function Board({ state }: { state: AppState }): JSX.Element {
         case 'n':
         case 'N':
           e.preventDefault()
-          state.go({ name: 'edit', id: null, kind: 'deadline' })
+          go({ name: 'edit', id: null, kind: 'deadline' })
           return
       }
 
@@ -101,16 +104,16 @@ export function Board({ state }: { state: AppState }): JSX.Element {
       switch (e.key) {
         case 'Enter':
           e.preventDefault()
-          state.complete(task)
+          complete(task)
           return
         case 'Backspace':
           e.preventDefault()
-          state.remove(task)
+          remove(task)
           return
         case 's':
         case 'S':
           e.preventDefault()
-          void state.run({
+          void run({
             type: 'task:snooze',
             id: task.id,
             minutes: snapshot!.settings.snoozeMinutes
@@ -119,11 +122,11 @@ export function Board({ state }: { state: AppState }): JSX.Element {
         case 't':
         case 'T':
           e.preventDefault()
-          void state.run({ type: 'task:postpone', id: task.id })
+          void run({ type: 'task:postpone', id: task.id })
           return
       }
     },
-    [cursor, flat, tasks, state, snapshot, menuOpen]
+    [cursor, flat, tasks, snapshot, menuOpen, go, run, complete, remove]
   )
 
   useEffect(() => {
@@ -204,6 +207,26 @@ function Head({
           <span className="dateline__dow">{WEEKDAYS[d.getDay()]}</span>
         </h1>
         <div className="head__actions">
+          {/* 日历与倒计时放在最前面：它们是「看别的日子」的两个入口，
+              和后面那两个（外观、设置）不是一类东西 */}
+          <button
+            type="button"
+            className="iconbutton"
+            aria-label="日历"
+            title="日历"
+            onClick={() => state.go({ name: 'calendar' })}
+          >
+            <CalendarGlyph />
+          </button>
+          <button
+            type="button"
+            className="iconbutton"
+            aria-label="倒计时"
+            title="倒计时"
+            onClick={() => state.go({ name: 'countdown' })}
+          >
+            <HourglassGlyph />
+          </button>
           {/* 图标画的是「点下去会变成什么」，不是「现在是什么」——
               和系统里那一排开关一致，不用先想一下再点 */}
           <button
@@ -285,8 +308,7 @@ function MoonGlyph(): JSX.Element {
 }
 
 /** 顶栏那个入口现在指向设置，所以画的是齿轮而不是加号 */
-function GearGlyph(): JSX.Element {
-  return (
+function GearGlyph(): JSX.Element {  return (
     <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
       <g transform="translate(8 8)">
         {Array.from({ length: 6 }, (_, i) => (
@@ -304,6 +326,53 @@ function GearGlyph(): JSX.Element {
       </g>
       <circle cx="8" cy="8" r="4.1" fill="none" stroke="currentColor" strokeWidth="1.4" />
       <circle cx="8" cy="8" r="1.45" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
+/** 日历：一页格子，顶上是装订线，中间一行小点代表「那天有事」 */
+function CalendarGlyph(): JSX.Element {
+  return (
+    <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <rect
+        x="1.9"
+        y="3.1"
+        width="12.2"
+        height="11"
+        rx="1.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <line x1="1.9" y1="6.5" x2="14.1" y2="6.5" stroke="currentColor" strokeWidth="1.4" />
+      <g stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+        <line x1="5.1" y1="1.5" x2="5.1" y2="3.9" />
+        <line x1="10.9" y1="1.5" x2="10.9" y2="3.9" />
+      </g>
+      <g fill="currentColor">
+        <circle cx="5.2" cy="9.5" r="0.85" />
+        <circle cx="8" cy="9.5" r="0.85" />
+        <circle cx="10.8" cy="9.5" r="0.85" />
+        <circle cx="5.2" cy="12" r="0.85" />
+        <circle cx="8" cy="12" r="0.85" />
+      </g>
+    </svg>
+  )
+}
+
+/** 倒计时：沙漏。中间那一粒沙是唯一非线条的笔画，缩到 16px 也不糊 */
+function HourglassGlyph(): JSX.Element {
+  return (
+    <svg className="glyph" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <g fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+        <line x1="3.6" y1="2.1" x2="12.4" y2="2.1" />
+        <line x1="3.6" y1="13.9" x2="12.4" y2="13.9" />
+        <path d="M5 2.1c0 3.1 3 3.7 3 5.9s-3 2.8-3 5.9" />
+        <path d="M11 2.1c0 3.1-3 3.7-3 5.9s3 2.8 3 5.9" />
+      </g>
+      <g fill="currentColor">
+        <circle cx="8" cy="8" r="0.7" />
+      </g>
     </svg>
   )
 }

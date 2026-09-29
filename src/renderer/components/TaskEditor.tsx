@@ -1,7 +1,8 @@
 import { useState, type JSX } from 'react'
-import { tsFromDayKey } from '@shared/calendar'
+import { dayLabel, tsFromDayKey } from '@shared/calendar'
 import type { TaskDraft, TaskKind } from '@shared/commands'
-import { dayKey, WEEKDAYS } from '@shared/time'
+import { expandRecurrence } from '@shared/recurrence'
+import { dayKey, startOfDay, WEEKDAYS } from '@shared/time'
 import type { RecurrenceRule, Task, Weekday } from '@shared/types'
 import type { AppState, View } from '../useAppState'
 import { DateField } from './DateField'
@@ -50,8 +51,14 @@ export function TaskEditor({
 }): JSX.Element {
   const snapshot = state.snapshot!
   const editing = view.id === null ? null : (snapshot.tasks.find((t) => t.id === view.id) ?? null)
-  const [form, setForm] = useState<Form>(() => initialForm(editing, view.kind, snapshot.settings))
+  const [form, setForm] = useState<Form>(() =>
+    initialForm(editing, view.kind, snapshot.settings, view.dueDay)
+  )
   const [problem, setProblem] = useState<string | null>(null)
+
+  // 从哪进来就回哪去。日历上「在这天记一件」之后落到看板是**丢上下文**的 ——
+  // 那条任务在别的日子，今天的看板上什么都不会变
+  const back: View = view.from === 'calendar' ? { name: 'calendar' } : { name: 'board' }
 
   const f = form
   const set = <K extends keyof Form>(key: K, value: Form[K]): void =>
@@ -82,7 +89,7 @@ export function TaskEditor({
         : { type: 'task:edit', id: editing.id, draft }
     )
     state.setFlash(editing === null ? '已记下' : '已保存')
-    state.go({ name: 'board' })
+    state.go(back)
   }
 
   return (
@@ -93,7 +100,7 @@ export function TaskEditor({
             type="button"
             className="iconbutton"
             aria-label="不保存，返回"
-            onClick={() => state.go({ name: 'board' })}
+            onClick={() => state.go(back)}
           >
             ←
           </button>
@@ -292,6 +299,14 @@ export function TaskEditor({
                 </span>
               </div>
             )}
+
+            {/* 预览放在这一段最后：上面的频率 / 间隔 / 星期 / 几号 / 时刻 / 周末
+                每一项都会改变结果，摆在中间会读成「只反映它上面的几项」 */}
+            <NextRuns
+              form={f}
+              anchor={editing === null ? null : editing.createdAt}
+              now={state.now}
+            />
           </>
         )}
 
@@ -330,7 +345,7 @@ export function TaskEditor({
             className="bottombar__danger"
             onClick={() => {
               state.remove(editing)
-              state.go({ name: 'board' })
+              state.go(back)
             }}
           >
             删除这条
@@ -341,13 +356,59 @@ export function TaskEditor({
   )
 }
 
-/** 表单初值：编辑时逐字段还原，新建时用设置里的默认值 */
+/**
+ * 「接下来几次」。规则本身看不见 —— 选了「每 2 周的周三」之后，
+ * 界面上没有任何东西能回答「那到底哪几天响」。
+ *
+ * 用 `expandRecurrence`（`shared/recurrence.ts` 里的纯函数，有测试）算，
+ * 不在组件里另写一遍推进逻辑。
+ *
+ * **锚点必须跟着编辑的对象走**：`matchesDay` 对 every > 1 的规则按
+ * `(target - anchor) % every` 定相位，锚点偏一天结果就整体错开一格。
+ * 编辑一条老任务时锚点是它的 `createdAt`（不是今天），传 null 表示新建 ——
+ * 新建的 `createdAt` 就是提交那一刻。
+ *
+ * `now` 由外面传（`state.now`）而不是在渲染里读 `Date.now()` —— 渲染要保持纯，
+ * 而且那个时钟在编辑器打开时照常走（见 useAppState 的 clockMode）。
+ */
+function NextRuns({
+  form,
+  anchor,
+  now
+}: {
+  form: Form
+  anchor: number | null
+  now: number
+}): JSX.Element | null {
+  const rule = ruleOf(form)
+  // 规则还不成立（没选星期 / 没选日子）时不出声 —— 那时下面那句问题提示
+  // 才是用户该看的东西，两个一起出现只会互相打架
+  if (typeof rule === 'string') return null
+
+  const days = expandRecurrence(rule, anchor ?? now, startOfDay(now), 4)
+  if (days.length === 0) return null
+
+  return (
+    <div className="field field--stack">
+      <span className="field__label">接下来</span>
+      <div className="field__hint">{days.map((d) => dayLabel(d, now)).join(' · ')}</div>
+    </div>
+  )
+}
+
+/**
+ * 表单初值：编辑时逐字段还原，新建时用设置里的默认值。
+ *
+ * `dueDay` 只有从日历进来时才有 —— 它**不改类型**，只换掉「日期」那一格
+ * 的初值。周期型与清单池用不到它（它们没有截止日）。
+ */
 function initialForm(
   task: Task | null,
   kind: TaskKind,
-  settings: { defaultLeadMin: number; allDayRemindTime: string }
+  settings: { defaultLeadMin: number; allDayRemindTime: string },
+  dueDay?: string
 ): Form {
-  const today = dayKey(Date.now())
+  const today = dueDay ?? dayKey(Date.now())
   const todayDow = new Date().getDay() as Weekday
   const base: Form = {
     kind,
@@ -412,21 +473,32 @@ function toDraft(f: Form, defaultLeadMin: number): TaskDraft | string {
     }
   }
 
+  const rule = ruleOf(f)
+  if (typeof rule === 'string') return rule
+  return { kind: 'recurring', ...common, rule, remindTime: f.remindTime }
+}
+
+/**
+ * 表单 → 重复规则，或一句人话说明还差什么。
+ *
+ * 单独一个函数是因为**「下次触发」的预览和真正提交的 draft 必须是同一条规则** ——
+ * 两处各算一遍的话，预览说「下周三」而实际排到周四这类错位迟早出现，
+ * 而且看起来会像是排期算错了。
+ */
+function ruleOf(f: Form): RecurrenceRule | string {
   const every = clamp(num(f.every, 1), 1, 99)
   if (f.freq === 'weekly' && f.weekdays.length === 0) return '至少选一个星期'
   if (f.freq === 'monthly' && f.monthDays.length === 0) return '至少选一个日子'
-  const rule: RecurrenceRule =
-    f.freq === 'daily'
-      ? { freq: 'daily', every, skipWeekend: false }
-      : f.freq === 'weekly'
-        ? { freq: 'weekly', every, days: [...f.weekdays].sort(), skipWeekend: f.skipWeekend }
-        : {
-            freq: 'monthly',
-            every,
-            days: [...f.monthDays].sort((a, b) => a - b),
-            skipWeekend: f.skipWeekend
-          }
-  return { kind: 'recurring', ...common, rule, remindTime: f.remindTime }
+  return f.freq === 'daily'
+    ? { freq: 'daily', every, skipWeekend: false }
+    : f.freq === 'weekly'
+      ? { freq: 'weekly', every, days: [...f.weekdays].sort(), skipWeekend: f.skipWeekend }
+      : {
+          freq: 'monthly',
+          every,
+          days: [...f.monthDays].sort((a, b) => a - b),
+          skipWeekend: f.skipWeekend
+        }
 }
 
 /** 日期控件的 'YYYY-MM-DD' → 当天本地 00:00 在 shared/calendar.ts（tsFromDayKey） */

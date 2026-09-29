@@ -47,12 +47,19 @@ export function exitDurationMs(kind: ExitKind): number {
  * 复活。这是刻意的：一条任务从列表消失有五种原因（完成 / 软删 / 推到明天 /
  * 改成别的类型 / 跨过午夜），只有调用方明确登记过的才配播退场动画，
  * 靠 diff 猜会把「被推到明天」播成「划掉」。
+ *
+ * 没有在退场的行时**把入参原样还回去**（同一个引用，不是新数组）：
+ * 调用方 `useAppState` 把返回值当 `tasks` 用，而它下游的 `groupToday`、
+ * 行序列、每一行都挂在 `useMemo`/props 上 —— 每次新建数组会让整条链失效、
+ * 整棵树重算。没有退场行时本来就没有任何东西要改，返回同一份引用即可断掉这条链。
  */
 export function mergeExiting(
-  current: readonly Task[],
+  current: Task[],
   exiting: readonly ExitingEntry[],
   now: number
 ): { tasks: Task[]; expired: string[] } {
+  if (exiting.length === 0) return { tasks: current, expired: [] }
+
   const expired: string[] = []
   const replacement = new Map<string, Task>()
   const seen = new Set<string>()

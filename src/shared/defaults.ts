@@ -1,6 +1,20 @@
 import type { Settings } from './types'
 
-export const FILE_VERSION = 1
+/**
+ * 数据文件格式版本。
+ *
+ * v2（2026-09-29）：多了 `anniversaries` 一集，设置里多了两个倒计时开关。
+ * v3（2026-09-29）：设置里多了 `autoUpdate`。
+ * **加字段就必须提版本号**，理由不是「格式变了」而是那条老规矩：
+ * 装过新版本又退回旧版本时，旧版本靠这个数认出「这份文件比我新」，
+ * 于是先备份再动 —— 否则它第一次改设置就会把全量重写一遍，
+ * 用户的纪念日无声消失。
+ *
+ * v3 这个字段本身不致命（旧版本丢掉它只是失去一个开关），但规矩是
+ * 看「有没有新字段」而不是「丢了会怎样」：判据一旦掺进「这个大概不要紧」，
+ * 下次真要紧的时候就没人记得该提了。
+ */
+export const FILE_VERSION = 3
 
 /** 状态巡检周期。10 秒足够，且远比 1 秒省电 */
 export const TICK_MS = 10_000
@@ -24,5 +38,12 @@ export const DEFAULT_SETTINGS: Settings = {
   idleThresholdMin: 5,
   hotkey: 'Control+Alt+T',
   theme: 'auto',
-  alwaysOnTop: false
+  alwaysOnTop: false,
+  countdownHolidays: true,
+  // 一年。大多数人要的是「下一个假期」和「最近的几个纪念日」，
+  // 把三年后的也堆在上面只会让最近的几条被淹掉
+  countdownHorizonDays: 365,
+  // 默认开着：这是个常驻托盘的私人工具，「装好就不用再管」正是它的卖点。
+  // 关掉的代价只是「不会自动发现新版」而已，不是一个危险的默认值
+  autoUpdate: true
 }

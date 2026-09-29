@@ -6,6 +6,8 @@ import { IPC, type NoticeId, type Snapshot, type WindowAction } from '../shared/
 import type { NoticeCenter } from './notices'
 import type { Scheduler } from './scheduler'
 import type { Store } from './store'
+import type { Updater } from './updater'
+import { RELEASES_URL } from '../shared/update'
 
 export interface AppContext {
   store: Store
@@ -35,18 +37,30 @@ export interface AppContext {
    */
   setHotkey: (hotkey: string) => boolean
   quickAdd: { hide: () => void }
+  /**
+   * 更新器。状态从它取；「检查 / 下载 / 重启安装」三个动作也发给它。
+   *
+   * 它自己没有「广播」的能力（那是 ipc.ts 的 `broadcast`），
+   * 所以构造时把 `broadcast(ctx)` 以 `onChange` 注进去 —— 和 `raiseNotice`
+   * 同一条路（见 index.ts）。
+   */
+  updater: Updater
 }
 
 export function buildSnapshot(ctx: AppContext): Snapshot {
   return {
     tasks: [...ctx.store.tasks],
+    anniversaries: [...ctx.store.anniversaries],
     settings: ctx.store.settings,
     runtime: {
       pausedUntil: ctx.scheduler.pausedUntil,
       hotkeyRegistered: ctx.hotkeyRegistered(),
       corruptBackupPath: ctx.store.corruptBackupPath,
+      droppedTaskCount: ctx.store.droppedTaskCount,
+      newerFileVersion: ctx.store.newerFileVersion,
       notices: ctx.notices.list(),
       version: app.getVersion(),
+      update: ctx.updater.getState(),
       dataFile: ctx.store.dataFile
     }
   }
@@ -131,6 +145,11 @@ export function registerIpc(ctx: AppContext): void {
         else void shell.openPath(dirname(target))
         return
       }
+      case 'open-download-page':
+        // 便携版唯一的出路。用系统浏览器打开而不是内嵌窗口 ——
+        // 用户接下来要下载一个 100MB 的 exe，那件事不该由这个 420px 的小窗承担
+        void shell.openExternal(RELEASES_URL)
+        return
       case 'quit':
         app.quit()
         return
@@ -154,5 +173,21 @@ export function registerIpc(ctx: AppContext): void {
     ctx.notices.dismiss(id)
     broadcast(ctx)
     return buildSnapshot(ctx)
+  })
+
+  // 更新这三条都**不等结果**就返回：状态由 Updater 自己广播回来。
+  // 「检查」尤其要这样 —— 它要等一个 HTTPS 往返，await 住的话按钮会看起来
+  // 卡死好几秒，而实际上它只是还没回来。
+  ipcMain.handle(IPC.checkUpdate, () => {
+    void ctx.updater.check()
+  })
+
+  ipcMain.handle(IPC.downloadUpdate, () => {
+    void ctx.updater.download()
+  })
+
+  ipcMain.handle(IPC.installUpdate, () => {
+    // 这条会走到 quitAndInstall，进程随后重启 —— 没有返回值可言
+    ctx.updater.install()
   })
 }

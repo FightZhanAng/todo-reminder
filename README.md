@@ -36,10 +36,10 @@ Electron 43 + electron-vite 5 + React 19 + TypeScript，包管理 pnpm。
 pnpm dev        # 起开发实例
 pnpm build      # 出 out/
 pnpm typecheck  # 主进程 + 渲染层两套配置
-pnpm test:core  # 核心逻辑 507 项
-pnpm smoke      # 界面冒烟 116 项（真开 Electron 点一遍）
+pnpm test:core  # 核心逻辑 814 项
+pnpm smoke      # 界面冒烟 188 项（真开 Electron 点一遍）
 pnpm icons      # 从代码重画 resources/icon.ico
-pnpm dist       # 出安装包：release/*-setup.exe（NSIS）+ 同版本便携版
+pnpm dist       # 出安装包：release/*-setup.exe（NSIS）+ 同版本便携版 + latest.yml
 ```
 
 `pnpm smoke` 要在 PowerShell 里跑，且先 `Remove-Item Env:\ELECTRON_RUN_AS_NODE` —— 本机预设了它，
@@ -74,6 +74,14 @@ Electron 会以 node 模式启动、`app.ready` 之前静默退出。结果落�
 （`.github/workflows/release.yml`）：`todo-reminder-<版本>-setup.exe`（NSIS，per-user 安装）
 与 `todo-reminder-<版本>-portable.exe`（便携版，双击即用，但开机自启别指望它 ——
 它跑在临时解压目录里）。
+
+**只有安装版能自动更新。** setup 装完之后，应用会在启动 20 秒后查一次新版本，之后每 6 小时一次，
+查到就后台下好、退出时装上；设置页「更新」那一组能看到当前版本、开关和进度，也可以手动点「检查更新」。
+便携版**不行** —— 它每次运行都解压到临时目录，没有一个可以覆盖的安装位置，所以那一格只会给一个
+「打开发布页」的按钮让你自己下。不想让它联网就在设置页关掉「自动更新」，关掉之后连定时检查一起撤掉。
+
+> 发版时 tag 必须和 `package.json` 的 `version` 一致，Release 不能存成 draft，并且
+> `latest.yml` 与 `*.blockmap` 得和 exe 一起上传 —— 少一条都不会报错，只会一直说「已是最新」。
 
 ## 许可
 

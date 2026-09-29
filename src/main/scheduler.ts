@@ -72,11 +72,12 @@ export class Scheduler {
    * 回填已处理的提醒点，保证 tick 幂等。
    * 由 notify 的调用方在桌面通知真正发出后调 —— 调度器自己不标，
    * 因为「交出去」不等于「用户看见了」。
+   *
+   * 走 `updateTasks` 而不是逐条 `updateTask`：一批 60 条逐条写就是 60 次
+   * 全量重写 + fsync（实测放大 59 倍），而这里本来就是一个批次。
    */
   markFired(entries: DueEntry[]): void {
-    for (const entry of entries) {
-      this.store.updateTask(entry.task.id, { firedFor: entry.at })
-    }
+    this.store.updateTasks(entries.map((e) => ({ id: e.task.id, patch: { firedFor: e.at } })))
   }
 
   tick(): void {

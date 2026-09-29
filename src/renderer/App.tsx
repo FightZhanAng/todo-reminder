@@ -1,5 +1,7 @@
 import type { JSX } from 'react'
 import { Board } from './components/Board'
+import { CalendarView } from './components/CalendarView'
+import { CountdownView } from './components/CountdownView'
 import { DoneView } from './components/DoneView'
 import { FutureView } from './components/FutureView'
 import { Inbox } from './components/Inbox'
@@ -29,7 +31,11 @@ export default function App(): JSX.Element {
       {renderView(state)}
       {state.flash !== null && (
         <div className="flash">
-          <div className="flash__inner">{state.flash}</div>
+          <div
+            className={state.flash.tone === 'error' ? 'flash__inner flash__inner--error' : 'flash__inner'}
+          >
+            {state.flash.text}
+          </div>
         </div>
       )}
     </div>
@@ -46,6 +52,10 @@ function renderView(state: ReturnType<typeof useAppState>): JSX.Element {
       return <DoneView state={state} />
     case 'future':
       return <FutureView state={state} />
+    case 'calendar':
+      return <CalendarView state={state} />
+    case 'countdown':
+      return <CountdownView state={state} />
     case 'settings':
       return <SettingsPanel state={state} />
     case 'edit':

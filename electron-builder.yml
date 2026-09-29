@@ -10,6 +10,16 @@ files:
   - out/**/*
   - package.json
 
+# 更新源。**必须显式写出来**：electron-builder 会按这段生成包内的
+# `resources/app-update.yml`，运行时 electron-updater 只认那个文件 ——
+# 而它是靠 git remote 推断的（推断出来的值恰好也对，但换个 fork、
+# CI 里换成 https 形式的 remote、或者浅克隆，推出来的 owner/repo 就可能不是
+# 这个仓库）。自动更新指向别人的仓库是那种「装上以后才发现」的问题。
+publish:
+  provider: github
+  owner: FightZhanAng
+  repo: todo-reminder
+
 win:
   # 用自己生成的多尺寸 .ico，不要喂 png 让它去转 —— electron-builder 内置的
   # WASM 图标工具在内存受限环境下会直接把打包流程崩掉。ico 本身是代码画出来的

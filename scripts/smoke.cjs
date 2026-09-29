@@ -38,6 +38,17 @@ const boot = {
 }
 
 const checks = []
+
+/**
+ * 主窗口的引用 + 渲染层的最后一条报错。
+ *
+ * `executeJavaScript` 被拒时只给一句「Script failed to execute」，
+ * 真实堆栈全在渲染进程里 —— 而 React 在渲染期抛错时还会顺手把整棵树卸载掉，
+ * 后面每一条断言都变成「找不到元素」，根因埋在一堆连锁失败底下。
+ * 所以进场时就挂一个 window error 监听，中途炸掉时把堆栈贴进 problems。
+ */
+let mainWin = null
+let rendererError = null
 const problems = []
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -182,17 +193,49 @@ const todayTasks = [
 
 const snapshot = {
   tasks: todayTasks,
+
+  // ---- 倒计时这本书的素材 ----
+  // 纪念日不是任务（没有 completedAt / firedFor），走自己的数组。
+  // `ann-far` 是刻意留在 365 天外的：用来验「还有 N 条更远的没显示」那一行。
+  anniversaries: [
+    {
+      id: 'ann-mom', title: '妈妈生日', date: '1968-03-12', yearly: true, lunar: false,
+      createdAt: now - 10 * 86_400_000, updatedAt: now
+    },
+    {
+      id: 'ann-lunar', title: '外婆生日', date: '1990-09-24', yearly: true, lunar: true,
+      createdAt: now - 9 * 86_400_000, updatedAt: now
+    },
+    {
+      id: 'ann-once', title: '术后复查', date: dayKeyOf(startOfToday + 20 * 86_400_000),
+      yearly: false, lunar: false, createdAt: now - 8 * 86_400_000, updatedAt: now
+    },
+    {
+      id: 'ann-far', title: '毕业二十年', date: '2030-06-30', yearly: false, lunar: false,
+      createdAt: now - 7 * 86_400_000, updatedAt: now
+    }
+  ],
+
   settings: {
-    schemaVersion: 1, launchAtLogin: false, notifyEnabled: true, soundEnabled: true,
+    schemaVersion: 2, launchAtLogin: false, notifyEnabled: true, soundEnabled: true,
     allDayRemindTime: '09:00', defaultLeadMin: 10, snoozeMinutes: 10,
     quietHours: { start: '22:00', end: '08:00' }, quietWhenIdle: false, idleThresholdMin: 5,
     push: { enabled: false, configured: false, channel: 'serverchan', when: 'awayOnly', awayIdleMin: 5 },
-    hotkey: 'Control+Alt+T', theme: 'auto'
+    hotkey: 'Control+Alt+T', theme: 'auto',
+    countdownHolidays: true, countdownHorizonDays: 365
   },
   runtime: {
     pausedUntil: null, hotkeyRegistered: true, corruptBackupPath: null,
     notices: [{ id: 'notify-failed', level: 'warn', text: '通知没发出去', at: now }],
-    version: '0.1.0', dataFile: '（冒烟测试的假路径）'
+    version: '0.1.0',
+    // 更新状态由主进程推，这里就跟着在主进程侧改这一块再广播（见「更新」那一段）。
+    // 默认给 dev：探针跑的是 out/renderer/index.html，`app.isPackaged` 是 false，
+    // 真实运行到这一步得到的也是这个值
+    update: {
+      status: 'idle', version: null, percent: null, error: null,
+      checkedAt: null, unsupported: 'dev'
+    },
+    dataFile: '（冒烟测试的假路径）'
   }
 }
 
@@ -259,7 +302,11 @@ async function mainWindowPass() {
   win.webContents.on('render-process-gone', (_e, d) => problems.push(`渲染进程没了 ${JSON.stringify(d)}`))
 
   await win.loadFile(join(ROOT, 'out/renderer/index.html'))
+  mainWin = win
   win.webContents.send('todo:snapshot', snapshot)
+  await evalIn(win, `(window.addEventListener('error', (e) => {
+    window.__smokeError = String((e.error && e.error.stack) || e.message)
+  }), 'ok')`)
   await sleep(500)
 
   const board = await evalIn(win, `(() => ({
@@ -319,12 +366,14 @@ async function mainWindowPass() {
     const btns = [...document.querySelectorAll('.head__actions .iconbutton')]
     return { count: btns.length, labels: btns.map(b => b.getAttribute('aria-label')) }
   })()`)
-  ok('顶栏有主题开关和新建两个按钮', toggleHits.count === 2, toggleHits)
+  ok('顶栏四枚图标按钮：日历 / 倒计时 / 主题开关 / 设置', toggleHits.count === 4, toggleHits)
+  ok('前两枚是「看别的日子」的两个入口',
+    toggleHits.labels[0] === '日历' && toggleHits.labels[1] === '倒计时', toggleHits.labels)
   ok('主题开关的 aria-label 说明点下去会变成什么',
-    /^切到(浅色|深色)$/.test(toggleHits.labels[0] || ''), toggleHits.labels)
+    /^切到(浅色|深色)$/.test(toggleHits.labels[2] || ''), toggleHits.labels)
 
   sentCommands = []
-  await evalIn(win, `document.querySelector('.head__actions .iconbutton').click(), 'ok'`)
+  await evalIn(win, `document.querySelectorAll('.head__actions .iconbutton')[2].click(), 'ok'`)
   await sleep(250)
   const themeCmd = sentCommands[0]
   ok('主题开关发的是一条 settings:patch', themeCmd && themeCmd.type === 'settings:patch', themeCmd)
@@ -339,7 +388,7 @@ async function mainWindowPass() {
   const dark = await evalIn(win, `(() => ({
     matched: window.matchMedia('(prefers-color-scheme: dark)').matches,
     paper: getComputedStyle(document.body).backgroundColor,
-    label: document.querySelector('.head__actions .iconbutton').getAttribute('aria-label')
+    label: document.querySelectorAll('.head__actions .iconbutton')[2].getAttribute('aria-label')
   }))()`)
   ok('themeSource=dark 时渲染层的 prefers-color-scheme 跟着变', dark.matched === true, dark)
   ok('深色下底纸用的是深色 token', dark.paper === 'rgb(15, 19, 21)', dark.paper)
@@ -545,6 +594,217 @@ async function mainWindowPass() {
   const back = await evalIn(win, `!!document.querySelector('.dateline')`)
   ok('Esc 从已完成回到看板', back === true, back)
 
+  // ---- 日历这本账 ----
+  // 入口是顶栏第一枚图标（真实入口，顺便验它通）
+  await evalIn(win, `(document.querySelectorAll('.head__actions .iconbutton')[0].click(), 'ok')`)
+  await sleep(300)
+
+  // 翻到 2026 年 2 月。为什么钉死这个月：春节 2/15–2/23 是九天连休、另有 2/14 与 2/28
+  // 两个周六调休上班，一屏里同时能看到「休」和「班」两种徽标 —— 换成「当前月」的话
+  // 这批断言每翻一个月就换一套答案，等于没在断言。
+  for (let i = 0; i < 24; i++) {
+    const t = await evalIn(win, `(document.querySelector('.cal__title') || {}).textContent || ''`)
+    if (t === '2026 年 二月') break
+    await evalIn(win, `(document.querySelectorAll('.cal__nav')[0].click(), 'ok')`)
+    await sleep(60)
+  }
+
+  const cal2 = await evalIn(win, `(() => {
+    const grid = document.querySelector('.monthgrid')
+    const cells = [...document.querySelectorAll('.monthcell')]
+    const inMonth = cells.filter(c => !c.classList.contains('monthcell--out'))
+    // 有想法的格子：休/班徽标、农历或节气文字、未完成圆点
+    const dayOf = (n) => inMonth.find(c => c.querySelector('.monthcell__day').textContent === String(n))
+    return {
+      title: (document.querySelector('.topbar__title') || {}).textContent,
+      month: (document.querySelector('.cal__title') || {}).textContent,
+      cols: grid ? getComputedStyle(grid).gridTemplateColumns.split(' ').length : 0,
+      cells: cells.length,
+      out: cells.length - inMonth.length,
+      dows: [...document.querySelectorAll('.cal__dow')].map(e => e.textContent),
+      rest: document.querySelectorAll('.monthcell__badge:not(.monthcell__badge--work)').length,
+      work: document.querySelectorAll('.monthcell__badge--work').length,
+      labels: cells.filter(c => (c.querySelector('.monthcell__label') || {}).textContent).length,
+      spring: (dayOf(17).querySelector('.monthcell__label') || {}).textContent,
+      springBadge: !!dayOf(17).querySelector('.monthcell__badge:not(.monthcell__badge--work)'),
+      covered: !!dayOf(28), // 补在月末的邻月日子（3 月 1 号之前那格）
+      footer: (document.querySelector('.bottombar__link') || {}).textContent
+    }
+  })()`)
+  ok('日历顶栏标题', cal2.title === '日历', cal2.title)
+  ok('翻到 2026 年二月', cal2.month === '2026 年 二月', cal2.month)
+  ok('月历固定 7 列、格子是整周', cal2.cols === 7 && cal2.cells % 7 === 0, cal2)
+  ok('表头从周一开始', cal2.dows.join('') === '一二三四五六日', cal2.dows)
+  ok('首尾补了邻月的日子（留着能点）', cal2.out > 0, cal2.out)
+  ok('二月 28 天全在网格里（含补出来的邻月日）', cal2.covered === true, cal2.covered)
+  // 春节 2/15–2/23 九天连休 + 2/14、2/28 两个周六上班
+  ok('春节九天都挂着「休」徽标', cal2.rest === 9, cal2.rest)
+  ok('两个调休的周六挂着「班」徽标', cal2.work === 2, cal2.work)
+  ok('正月初一那格写着「春节」', cal2.spring === '春节', cal2.spring)
+  ok('那天同时带着「休」徽标', cal2.springBadge === true, cal2.springBadge)
+  ok('每一格都有农历或节气文字', cal2.labels === cal2.cells, cal2.labels)
+  ok('底栏是倒计时入口', /^倒计时/.test(cal2.footer || ''), cal2.footer)
+
+  // 点正月初一，看明细那一段
+  await evalIn(win, `(() => {
+    const c = [...document.querySelectorAll('.monthcell')].find(
+      (el) => !el.classList.contains('monthcell--out') &&
+        el.querySelector('.monthcell__day').textContent === '17'
+    )
+    c.click()
+    return 'ok'
+  })()`)
+  await sleep(250)
+  const dayCard = await evalIn(win, `(() => ({
+    on: document.querySelectorAll('.monthcell--on').length,
+    date: (document.querySelector('.daycard__date') || {}).textContent,
+    dow: (document.querySelector('.daycard__dow') || {}).textContent,
+    chip: (document.querySelector('.daycard__chip') || {}).textContent,
+    meta: (document.querySelector('.daycard__meta') || {}).textContent,
+    empty: (document.querySelector('.daycard__empty') || {}).textContent || null,
+    add: (document.querySelector('.daycard__add') || {}).textContent
+  }))()`)
+  ok('选中的格子只有一个', dayCard.on === 1, dayCard.on)
+  ok('明细写着那天是哪天', dayCard.date === '2 月 17 日' && dayCard.dow === '周二', dayCard)
+  ok('明细说这是春节第几天', dayCard.chip === '春节 第 3/9 天', dayCard.chip)
+  ok('明细把农历与节气写出来', /农历正月初一/.test(dayCard.meta || ''), dayCard.meta)
+  // 周期任务没有历史：二月十七这天不该凭空冒出「每天 09:00 吃药」这笔账
+  ok('过去的日子不带周期任务（那天没有任何安排）', dayCard.empty === '这天没有安排', dayCard)
+  ok('那天有「在这天记一件」', /记一件/.test(dayCard.add || ''), dayCard.add)
+
+  // 在日历上直接新建：日期要预填成选中的那天，返回也要回到日历（不是看板）
+  await evalIn(win, `(document.querySelector('.daycard__add').click(), 'ok')`)
+  await sleep(300)
+  const fromCal = await evalIn(win, `(() => ({
+    title: (document.querySelector('.topbar__title') || {}).textContent,
+    rel: (document.querySelector('.datefield__rel') || {}).textContent,
+    text: (document.querySelector('.datefield__text') || {}).textContent
+  }))()`)
+  ok('从日历进的是「记一件」', fromCal.title === '记一件', fromCal.title)
+  ok('日期预填成选中的那天', fromCal.text === '2月17日', fromCal)
+  await evalIn(win, `(document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 'ok')`)
+  await sleep(300)
+  ok('从日历进来就回日历（不是看板）',
+    (await evalIn(win, `(document.querySelector('.topbar__title') || {}).textContent`)) === '日历')
+
+  // ---- 倒计时这本账 ----
+  // 走日历底栏那枚链接 —— 它同时是「从日历去倒计时」的真实路径
+  await evalIn(win, `(document.querySelector('.bottombar__link').click(), 'ok')`)
+  await sleep(300)
+  const cd = await evalIn(win, `(() => {
+    const group = (name) => {
+      const l = [...document.querySelectorAll('.group__label')].find(e => e.textContent === name)
+      return l ? l : null
+    }
+    return {
+      title: (document.querySelector('.topbar__title') || {}).textContent,
+      groups: [...document.querySelectorAll('.group__label')].map(e => e.textContent),
+      heroLabel: (document.querySelector('.hero__label') || {}).textContent || null,
+      heroName: (document.querySelector('.hero__name') || {}).textContent || null,
+      heroNum: (document.querySelector('.hero__num') || {}).textContent || null,
+      heroUnit: (document.querySelector('.hero__unit') || {}).textContent || null,
+      heroSub: (document.querySelector('.hero__sub') || {}).textContent || null,
+      restNames: [...document.querySelectorAll('.crow--static .crow__title')].map(e => e.textContent),
+      restDays: [...document.querySelectorAll('.crow--static .crow__days')].map(e => e.textContent),
+      annNames: [...document.querySelectorAll('.crow__hit .crow__title')].map(e => e.textContent),
+      annDays: [...document.querySelectorAll('.crow__hit .crow__days')].map(e => e.textContent),
+      annSubs: [...document.querySelectorAll('.crow__hit .crow__sub')].map(e => e.textContent),
+      notes: [...document.querySelectorAll('.cal__note')].map(e => e.textContent),
+      hasHolidayGroup: group('节假日') !== null,
+      hasAnnGroup: group('纪念日') !== null
+    }
+  })()`)
+  ok('倒计时顶栏标题', cd.title === '倒计时', cd.title)
+  // 假期那一块有两种合法状态：说得出下一个假期，或者明说「安排还没公布」。
+  // 后者不是错误 —— 放假安排要等国务院发通知（见 shared/holiday.ts），
+  // 数据没跟上的年份这里就该闭嘴，而不是按规则推一个似是而非的日期。
+  const cdHasHoliday = cd.heroName !== null
+  ok('节假日那块要么给出下一个假期、要么明说还没公布',
+    cdHasHoliday
+      ? /^(最近的假期|正在放假)$/.test(cd.heroLabel || '') && /^\d+$/.test(cd.heroNum || '')
+      : cd.notes.some((n) => /还没公布/.test(n || '')),
+    cd)
+  if (cdHasHoliday) {
+    ok('倒计时是一个数字 + 单位', /天后|第/.test(cd.heroUnit || ''), {
+      num: cd.heroNum, unit: cd.heroUnit
+    })
+    ok('卡片副行是日期范围加天数', /· 共 \d+ 天$/.test(cd.heroSub || ''), cd.heroSub)
+    ok('还有别的假期时就摆出「节假日」分组，每行写着还有几天',
+      cdHasHoliday && cd.hasHolidayGroup
+        ? cd.restNames.length >= 1 && cd.restDays.every((d) => /^(就是今天|还有 \d+ 天)$/.test(d || ''))
+        : cd.hasHolidayGroup === false,
+      { names: cd.restNames, days: cd.restDays })
+  }
+  ok('纪念日分组在', cd.hasAnnGroup === true, cd.groups)
+  // 近的三条按「离得多近」排：20 天 / 164 天 / 342 天
+  ok('够近的纪念日都列出来、并按远近排', cd.annNames.join(','), '术后复查,妈妈生日,外婆生日')
+  ok('距离写成人话',
+    cd.annDays.every((d) => /^(就是今天|还有 \d+ 天|已过 \d+ 天)$/.test(d || '')), cd.annDays)
+  ok('农历纪念日把农历写出来', cd.annSubs.some((s) => (s || '').includes('农历')), cd.annSubs)
+  // 术后复查是一次性（不写农历、不写「已 N 天」）；妈妈生日是每年都数
+  ok('一次性的写全日期、不写农历', /^\d{4}年\d+月\d+日$/.test(cd.annSubs[0] || ''), cd.annSubs[0])
+  ok('每年都数的写着「已 N 天」', /已 \d+ 天/.test(cd.annSubs[1] || ''), cd.annSubs[1])
+  ok('更远的那条被藏起来并说明了几句',
+    cd.notes.some((n) => /还有 1 条更远的没显示/.test(n || '')), cd.notes)
+  ok('底部写明数据来源与「不弹通知」',
+    cd.notes.some((n) => /国务院办公厅/.test(n || '') && /不弹通知/.test(n || '')), cd.notes)
+
+  // 加一个纪念日：名字空着不放行、日期旁边当场显示农历
+  await evalIn(win, `(document.querySelector('.topbar__actions .iconbutton').click(), 'ok')`)
+  await sleep(250)
+  const annForm = await evalIn(win, `(() => ({
+    open: !!document.querySelector('.annform'),
+    labels: [...document.querySelectorAll('.annform .field__label')].map(e => e.textContent),
+    lunarInline: (document.querySelector('.annform .unit') || {}).textContent || null,
+    dateField: document.querySelectorAll('.annform .datefield').length,
+    nativeDate: document.querySelectorAll('.annform input[type=date]').length,
+    checks: document.querySelectorAll('.annform .check').length
+  }))()`)
+  ok('点「+」长出加纪念日的表单', annForm.open === true, annForm)
+  // 默认勾着「每年都数」，所以「按哪个历」也跟着长出来 —— 它不是多余的一格，
+  // 是「农历生日」唯一的入口（见 CountdownView 顶部）
+  ok('表单有名字/日期/重复，默认每年都数所以还多一格「按哪个历」',
+    annForm.labels.join('/') === '名字/日期/重复/按哪个历', annForm.labels)
+  ok('日期用的是自绘控件', annForm.dateField === 1 && annForm.nativeDate === 0, annForm)
+  ok('日期旁边当场把农历写出来给他对', /^农历/.test(annForm.lunarInline || ''), annForm.lunarInline)
+  ok('默认勾着「每年都数」', annForm.checks === 2, annForm.checks)
+
+  await evalIn(win, `(document.querySelector('.annform .topbar__button').click(), 'ok')`)
+  await sleep(200)
+  ok('空名字提交被挡住',
+    (await evalIn(win, `(document.querySelector('.annform .field__hint--warn') || {}).textContent || null`)) === '名字不能是空的')
+
+  // 收起表单，回到清单
+  await evalIn(win, `(document.querySelector('.annform .linkbutton').click(), 'ok')`)
+  await sleep(200)
+  ok('能收起表单', (await evalIn(win, `!!document.querySelector('.annform')`)) === false)
+
+  // 点一条纪念日 → 编辑表单，删除是两步确认（纪念日没有软删，也没有撤销窗口）
+  await evalIn(win, `(document.querySelector('.crow__hit').click(), 'ok')`)
+  await sleep(250)
+  const editForm = await evalIn(win, `(() => ({
+    title: (document.querySelector('.annform__title') || {}).textContent,
+    save: (document.querySelector('.annform .topbar__button') || {}).textContent,
+    del: (document.querySelector('.bottombar__danger') || {}).textContent || null
+  }))()`)
+  ok('点一行进的是「改一改」', editForm.title === '改一改' && editForm.save === '保存', editForm)
+  ok('删除第一下只问一次，不真删', editForm.del === '删掉这条', editForm.del)
+  sentCommands = []
+  await evalIn(win, `(document.querySelector('.bottombar__danger').click(), 'ok')`)
+  await sleep(200)
+  const confirmDel = await evalIn(win, `(document.querySelector('.bottombar__danger') || {}).textContent`)
+  ok('第一下不发删除命令', sentCommands.length === 0, sentCommands)
+  ok('第一下把按钮换成「再点一下确认删掉」', confirmDel === '再点一下确认删掉', confirmDel)
+  await evalIn(win, `(document.querySelector('.annform .linkbutton').click(), 'ok')`)
+  await sleep(150)
+
+  // Esc 从倒计时回看板
+  await evalIn(win, `(document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), 'ok')`)
+  await sleep(300)
+  ok('Esc 从倒计时回到看板',
+    (await evalIn(win, `!!document.querySelector('.dateline')`)) === true)
+
+
   win.webContents.send('todo:open-view', 'settings')
   await sleep(300)
   const settings = await evalIn(win, `(() => ({
@@ -555,15 +815,142 @@ async function mainWindowPass() {
     hint: (document.querySelector('.field--stack .field__hint') || {}).textContent,
     timeFields: document.querySelectorAll('.timefield').length,
     nativeTime: document.querySelectorAll('input[type=time]').length,
-    bodyOverflow: document.querySelector('.page__body').scrollHeight > document.querySelector('.page__body').clientHeight + 2
+    bodyOverflow: document.querySelector('.page__body').scrollHeight > document.querySelector('.page__body').clientHeight + 2,
+    // 「只看 N 天」给的是档位，不是数字输入框 —— 没人会想填「247 天」
+    horizon: (() => {
+      const f = [...document.querySelectorAll('.field')].find((el) => {
+        const l = el.querySelector('.field__label')
+        return l && l.textContent === '只看'
+      })
+      if (!f) return null
+      const seg = f.querySelector('.segmented')
+      return {
+        options: [...seg.children].map((b) => b.textContent),
+        on: (seg.querySelector('.segmented__item--on') || {}).textContent
+      }
+    })()
   }))()`)
-  ok('设置页五个分组都在', settings.groups.join('/') === '提醒/免打扰/外观与启动/随手记/数据', settings.groups)
+  ok('设置页七个分组都在', settings.groups.join('/') === '提醒/倒计时/免打扰/外观与启动/随手记/数据/更新', settings.groups)
   ok('设置页复选框都渲染了', settings.checks >= 5, settings.checks)
   ok('设置页有「窗口置顶」这一格', settings.labels.includes('窗口置顶'), settings.labels)
+  ok('倒计时那组有节假日开关与「只看 N 天」',
+    settings.labels.includes('节假日') && settings.labels.includes('只看'), settings.labels)
+  ok('「只看 N 天」是四个档位、不是输入框',
+    settings.horizon !== null && settings.horizon.options.join('/') === '一个月/三个月/一年/不限',
+    settings.horizon)
+  ok('当前档位跟着 settings.countdownHorizonDays 走', settings.horizon.on === '一年', settings.horizon)
   ok('快捷键读的是 settings.hotkey', settings.hotkey === 'Control+Alt+T', settings.hotkey)
   ok('快捷键状态文案跟着 runtime 走', /注册上了|小窗/.test(settings.hint || ''), settings.hint)
   ok('设置页的时刻也换成了自绘控件（全天 + 免打扰起止）', settings.timeFields === 3 && settings.nativeTime === 0, settings)
   ok('设置页内容比视口长（能滚）', settings.bodyOverflow === true, settings.bodyOverflow)
+
+  // ---- 更新这一格 ----
+  // 更新状态**不是设置**，是主进程推的运行时状态。所以这里在主进程侧改 snapshot
+  // 再广播 —— 和真实路径一致（Updater 事件 → onChange → broadcast），
+  // 不需要真发一个版本、也不需要网络。
+  const showUpdate = async (update) => {
+    snapshot.runtime.update = update
+    win.webContents.send('todo:snapshot', snapshot)
+    await sleep(150)
+  }
+  const readUpdate = () =>
+    evalIn(win, `(() => {
+      const f = [...document.querySelectorAll('.field')].find((el) => {
+        const l = el.querySelector('.field__label')
+        return l && l.textContent === '更新状态'
+      })
+      if (!f) return null
+      const btns = [...f.querySelectorAll('button')]
+      return {
+        text: (f.querySelector('.field__hint') || {}).textContent,
+        buttons: btns.map((b) => b.textContent),
+        disabled: btns.map((b) => b.disabled === true)
+      }
+    })()`)
+  const hasAutoUpdateCheck = () =>
+    evalIn(win, `[...document.querySelectorAll('.check')].some(
+      (c) => c.textContent.includes('自动检查并下载'))`)
+
+  await showUpdate({
+    status: 'idle', version: null, percent: null, error: null,
+    checkedAt: null, unsupported: null
+  })
+  const idleU = await readUpdate()
+  ok('更新那格显示当前状态', idleU !== null && idleU.text === '还没检查过', idleU)
+  ok('还没查过时给的是「检查更新」', idleU !== null && idleU.buttons.join('/') === '检查更新', idleU)
+  ok('能自动更新的环境里有那个开关', (await hasAutoUpdateCheck()) === true)
+
+  await showUpdate({
+    status: 'checking', version: null, percent: null, error: null,
+    checkedAt: null, unsupported: null
+  })
+  const checkingU = await readUpdate()
+  ok('检查中按钮变「正在检查…」且点不动',
+    checkingU !== null && checkingU.buttons.join('/') === '正在检查…' &&
+      checkingU.disabled[0] === true, checkingU)
+
+  await showUpdate({
+    status: 'available', version: '0.1.5', percent: null, error: null,
+    checkedAt: now, unsupported: null
+  })
+  const availU = await readUpdate()
+  ok('查到新版会写出版本号', availU !== null && availU.text === '发现新版本 0.1.5', availU)
+  ok('查到新版给的是「下载」', availU !== null && availU.buttons.join('/') === '下载', availU)
+
+  await showUpdate({
+    status: 'downloading', version: '0.1.5', percent: 42, error: null,
+    checkedAt: now, unsupported: null
+  })
+  const downU = await readUpdate()
+  ok('下载中显示百分比', downU !== null && downU.text === '正在下载 42%', downU)
+  ok('下载中不给按钮（不诱导去点取消，取消了下回还得重下）',
+    downU !== null && downU.buttons.length === 0, downU)
+
+  await showUpdate({
+    status: 'ready', version: '0.1.5', percent: 100, error: null,
+    checkedAt: now, unsupported: null
+  })
+  const readyU = await readUpdate()
+  ok('下好了明说重启后生效',
+    readyU !== null && readyU.text === '新版本 0.1.5 已下载好，重启后生效', readyU)
+  ok('下好了给的是「重启并安装」',
+    readyU !== null && readyU.buttons.join('/') === '重启并安装', readyU)
+
+  await showUpdate({
+    status: 'up-to-date', version: null, percent: null, error: null,
+    checkedAt: now, unsupported: null
+  })
+  const freshU = await readUpdate()
+  ok('已是最新时仍留着「检查更新」（让人能再查一次）',
+    freshU !== null && freshU.text === '已是最新版本' && freshU.buttons.join('/') === '检查更新',
+    freshU)
+
+  await showUpdate({
+    status: 'error', version: null, percent: null, error: '连不上更新服务器',
+    checkedAt: now, unsupported: null
+  })
+  const errU = await readUpdate()
+  ok('失败时把原因写出来，不是只写「失败」',
+    errU !== null && errU.text === '检查更新失败：连不上更新服务器', errU)
+
+  // 便携版：装不了自动更新（electron-updater 的 Windows 目标只有 NSIS，
+  // 而 portable 每次运行都解压到临时目录），唯一出路是发布页
+  await showUpdate({
+    status: 'idle', version: null, percent: null, error: null,
+    checkedAt: null, unsupported: 'portable'
+  })
+  const portU = await readUpdate()
+  ok('便携版明说装不了、要手动下载',
+    portU !== null && /便携版/.test(portU.text || '') && /手动下载/.test(portU.text || ''), portU)
+  ok('便携版给的是「打开发布页」',
+    portU !== null && portU.buttons.join('/') === '打开发布页', portU)
+  ok('便携版上不摆「自动更新」开关（摆了也不生效）', (await hasAutoUpdateCheck()) === false)
+
+  // 还原成开发态，别把后面的段落带歪
+  await showUpdate({
+    status: 'idle', version: null, percent: null, error: null,
+    checkedAt: null, unsupported: 'dev'
+  })
 
   // 编辑器：从看板点「+ 记一件」（底栏上方那个实心块；顶栏那两个是主题与设置）
   win.webContents.send('todo:open-view', 'board')
@@ -706,12 +1093,40 @@ async function mainWindowPass() {
   const weekly = await evalIn(win, `(() => ({
     labels: [...document.querySelectorAll('.field__label')].map(e => e.textContent),
     weekdays: [...[...document.querySelectorAll('.segmented')][2].children].map(b => b.textContent),
-    timeFields: document.querySelectorAll('.timefield').length
+    timeFields: document.querySelectorAll('.timefield').length,
+    // 「接下来」那一段：规则本身看不见，只有这一行能回答「到底哪几天响」
+    nextRuns: (() => {
+      const f = [...document.querySelectorAll('.field')].find((el) => {
+        const l = el.querySelector('.field__label')
+        return l && l.textContent === '接下来'
+      })
+      return f ? f.querySelector('.field__hint').textContent : null
+    })()
   }))()`)
   ok('周期型出现频率/间隔/提醒时刻', ['频率', '间隔', '提醒时刻'].every((l) => weekly.labels.includes(l)), weekly.labels)
   ok('每周出现星期选择器', weekly.weekdays.join('') === '一二三四五六日', weekly.weekdays)
   ok('目前没有日期控件了（换成了规则）', !weekly.labels.includes('日期'), weekly.labels)
   ok('提醒时刻用的也是自绘控件', weekly.timeFields === 1, weekly.timeFields)
+  ok('给出接下来几次', (weekly.nextRuns || '').split(' · ').length === 4, weekly.nextRuns)
+  ok('默认选中今天，所以下一次就是今天',
+    (weekly.nextRuns || '').split(' · ')[0] === '今天', weekly.nextRuns)
+
+  // 规则还不成立（一个星期都没选）时预览要收起来：那一刻用户该看的是
+  // 提交时那句人话，两个提示一起出现只会互相打架
+  const offIndex = await evalIn(win, `(() => {
+    const seg = [...document.querySelectorAll('.segmented')][2]
+    const i = [...seg.children].findIndex(b => b.classList.contains('segmented__item--on'))
+    seg.children[i].click()
+    return i
+  })()`)
+  await sleep(200)
+  ok('没选星期时不显示「接下来」',
+    (await evalIn(win, `[...document.querySelectorAll('.field__label')].some(e => e.textContent === '接下来')`)) === false)
+  // 选回来，后面几段还要用这份表单
+  await evalIn(win, `([...document.querySelectorAll('.segmented')][2].children[${offIndex}].click(), 'ok')`)
+  await sleep(200)
+  ok('选回星期后预览回来',
+    (await evalIn(win, `[...document.querySelectorAll('.field__label')].some(e => e.textContent === '接下来')`)) === true)
 
   // 空标题提交：留下人话，不离开编辑器
   await evalIn(win, `document.querySelector('.topbar__button').click(), 'ok'`)
@@ -799,6 +1214,15 @@ app.whenReady().then(async () => {
     mark('quick-done')
   } catch (err) {
     problems.push('探针自己炸了：' + (err && err.stack ? err.stack : String(err)))
+    // 渲染层那半边的堆栈只能这样捞回来（见 mainWin / __smokeError 的注释）
+    try {
+      if (mainWin !== null && !mainWin.isDestroyed()) {
+        rendererError = await mainWin.webContents.executeJavaScript('window.__smokeError || null', true)
+      }
+    } catch (inner) {
+      rendererError = '（连渲染层的报错都读不到：' + String(inner) + '）'
+    }
+    if (rendererError !== null) problems.push('渲染层的报错：' + rendererError)
   }
 
   const passed = checks.filter((c) => c.pass).length

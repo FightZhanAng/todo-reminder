@@ -44,7 +44,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: release/todo-reminder-*.exe
+          # latest.yml 与 blockmap 不是给人双击的安装包，但**少了它们自动更新
+          # 就完全不通**：客户端要先读 latest.yml 才知道有没有新版，读不到就是 404
+          path: |
+            release/todo-reminder-*.exe
+            release/latest.yml
+            release/*.blockmap
           if-no-files-found: error
 
       - name: 发 Release
@@ -53,8 +58,16 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           gh release view "$tag" >/dev/null 2>&1 ||
             gh release create "$tag" --title "$tag" \
-              --notes "Windows 安装包。setup 是 per-user NSIS 安装版；portable 双击即用，但开机自启别用它（它跑在临时解压目录里）。"
-          gh release upload "$tag" release/todo-reminder-*.exe --clobber
+              --notes "Windows 安装包。setup 是 per-user NSIS 安装版，带自动更新；portable 双击即用但不能自动更新（它跑在临时解压目录里），新版本要自己下。"
+          # latest.yml 是自动更新的版本指针，必须和 exe 属于同一次构建 ——
+          # 拿旧的 yml 配新的 exe，客户端会按错误的 sha512 校验失败。
+          # 注意 tag 必须和 package.json 的 version 一致，否则客户端算了半天
+          # 也认不出有新版（两边版本号对不上）
+          gh release upload "$tag" \
+            release/todo-reminder-*.exe \
+            release/latest.yml \
+            release/*.blockmap \
+            --clobber
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
