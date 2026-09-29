@@ -296,6 +296,33 @@
      真要腾空间就手动（资源管理器）删。
    另：`--dir` 模式**不生成 `app-update.yml`、也不带 `elevate.exe`**（那是完整打包/NSIS 才有的），
    别以为自动更新坏了。
+10. **打包报 `EBUSY: resource busy or locked, unlink …\release\win-unpacked.tmp\resources\*.asar`
+   时，是那个文件上挂了个「删不掉的句柄」—— 而且很可能是 safe-delete 自己弄出来的。**
+   完整症状：electron-builder 能把暂存目录里 74/75 个文件清掉，只卡在一个 `.asar` 上，
+   然后 `Command failed with exit code 1`。看着像玄学，其实有确定的判据和确定的解法：
+
+   - **怎么确认是句柄而不是权限/属性**：用 `CreateFileW` 以 `dwShareMode = 0`（独占）去开它。
+     返回 `ERROR_SHARING_VIOLATION(32)` 就是真有别的进程拿着句柄；能开就是别的问题。
+     别用「属性有没有只读」判断 —— 实测属性是干净的 `Archive`、也不是硬链接。
+   - **为什么 `unlink` 和 `rename` 都失败、但「截断成 0 字节」却成功**：持有方打开时带的是
+     `FILE_SHARE_WRITE` 但**没有** `FILE_SHARE_DELETE` —— 能写不能删，这是最典型的组合。
+     Electron 用 mmap 读 `*.asar` 正好是这个共享模式，所以**出事的总是 `.asar`**。
+   - **凶手多半看不见**：`Get-Process` 里翻不到任何进程占着它（受保护进程如 Defender 压根
+     枚举不出来），`handle.exe` 本机也没装，`openfiles` 又要先开「维护对象列表」系统标志。
+     **别在这上面耗时间**，直接按下面解。
+   - **大概率是 safe-delete 自己泄漏的句柄**：它去「送回收站」时打开了目标文件，失败的
+     那一次把句柄漏了，于是**这个文件从此永久删不掉**（连下一次 safe-delete 也会失败），
+     表现就是「第一次没删掉，以后再也删不掉」。本项目里 `.tmp-pkg\...\app.asar` 与
+     `release\win-unpacked.tmp\resources\default_app.asar` 都是这么被毒上的。
+   - **解法一（推荐）**：**重启 WorkBuddy**（或重启机器）释放句柄 → 在**资源管理器里**删掉
+     整个 `release\` → 再 `pnpm dist`。资源管理器不在 shim 的进程树里，删除不走 safe-delete。
+   - **解法二（不想重启）**：换一个全新的输出目录，完全不碰那个中毒的暂存目录 ——
+     实测可行（`--config.directories.output=.tmp-pkg-verify`，`exit=0`）。
+     代价是多一份几百 MB 的产物要清。
+
+   顺带一条：**这个坑的入口是「构建被打断」**。electron-builder 每次都要清自己的
+   `win-unpacked.tmp`，而它一旦被中断就会留下一个 `resources\` 尾巴。所以宁可
+   「先想好输出目录再跑」也别中途 Ctrl-C。
 
 ## 文件卫生
 
