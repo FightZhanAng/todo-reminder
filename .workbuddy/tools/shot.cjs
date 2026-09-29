@@ -116,11 +116,11 @@ const snapshot = {
     // 这两个不写的话 `newerFileVersion` 是 undefined、`undefined !== null` 为真，
     // 设置页会凭空多出一条「数据文件来自更新的版本」的告警
     droppedTaskCount: 0, newerFileVersion: null,
-    notices: [], version: '0.1.4', dataFile: '（截图工具的假路径）',
+    notices: [], version: '0.1.5', dataFile: '（截图工具的假路径）',
     // 更新状态取自 runtime，且**开发态是 'dev'**（不检查更新、也不显示开关）。
     // 这里直接摆一个「有新版可下」的状态，好让截图能把开关和那颗按钮都拍进去
     update: {
-      status: 'available', version: '0.1.5', percent: null, error: null,
+      status: 'available', version: '0.1.6', percent: null, error: null,
       checkedAt: now, unsupported: null
     }
   }
