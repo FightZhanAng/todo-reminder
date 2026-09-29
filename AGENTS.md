@@ -307,15 +307,24 @@
    - **为什么 `unlink` 和 `rename` 都失败、但「截断成 0 字节」却成功**：持有方打开时带的是
      `FILE_SHARE_WRITE` 但**没有** `FILE_SHARE_DELETE` —— 能写不能删，这是最典型的组合。
      Electron 用 mmap 读 `*.asar` 正好是这个共享模式，所以**出事的总是 `.asar`**。
-   - **凶手多半看不见**：`Get-Process` 里翻不到任何进程占着它（受保护进程如 Defender 压根
-     枚举不出来），`handle.exe` 本机也没装，`openfiles` 又要先开「维护对象列表」系统标志。
-     **别在这上面耗时间**，直接按下面解。
-   - **大概率是 safe-delete 自己泄漏的句柄**：它去「送回收站」时打开了目标文件，失败的
-     那一次把句柄漏了，于是**这个文件从此永久删不掉**（连下一次 safe-delete 也会失败），
-     表现就是「第一次没删掉，以后再也删不掉」。本项目里 `.tmp-pkg\...\app.asar` 与
-     `release\win-unpacked.tmp\resources\default_app.asar` 都是这么被毒上的。
+   - **查凶手用 Restart Manager，别用枚举进程那一套**：`Get-Process` 翻不到（受保护进程
+     枚举不出来）、`handle.exe` 本机没装、`openfiles` 要先开「维护对象列表」系统标志 ——
+     这三条路 2026-09-29 全试过，白折腾了几十分钟。正解是 Windows 专门干这件事的 API：
+     `RmStartSession` → `RmRegisterResources(path)` → `RmGetList`（`ERROR_MORE_DATA=234`
+     是正常返回，按它给的 `need` 再调一次），最后 `RmEndSession` 配对。
+     完整可抄的 ctypes 片段在 `windows-c-drive-cleanup` skill 的 6b 节。
+   - **实测凶手是 WorkBuddy 自己**：那几个 `*.asar` 的持有者 PID 对应
+     `WorkBuddy.exe …\app.asar\main\daemon-app-server-entry.js --stdio`，
+     也就是**宿主应用的后端守护进程 —— 而它正是 safe-delete「送回收站」助手所在的进程**。
+     助手去 trash 时打开了目标文件，**操作失败/被拒时句柄没关**，这个文件从此删不掉，
+     下一次尝试再漏一个：**自锁死，越试越死**。
+     本项目里 `.tmp-pkg\...\app.asar` 和 `release\win-unpacked.tmp\resources\default_app.asar`
+     都是这么被毒上的。对照实验：新造一个 `.asar` 放 20 秒全程空闲（不是「见 asar 就锁」），
+     而删成功过的文件也不留句柄。
+     **推论：在会话里反复重试删除是有害的**，每次失败都可能再多锁一个文件。
    - **解法一（推荐）**：**重启 WorkBuddy**（或重启机器）释放句柄 → 在**资源管理器里**删掉
-     整个 `release\` → 再 `pnpm dist`。资源管理器不在 shim 的进程树里，删除不走 safe-delete。
+     整个 `release\` → 再 `pnpm dist`。资源管理器不在 shim 的进程树里，删除不走 safe-delete，
+     **也不会再产生新的泄漏**。
    - **解法二（不想重启）**：换一个全新的输出目录，完全不碰那个中毒的暂存目录 ——
      实测可行（`--config.directories.output=.tmp-pkg-verify`，`exit=0`）。
      代价是多一份几百 MB 的产物要清。
