@@ -252,7 +252,12 @@ ipcMain.handle('todo:command', (_e, cmd) => {
   return snapshot
 })
 ipcMain.handle('todo:set-hotkey', () => ({ ok: true }))
-ipcMain.handle('todo:window', () => undefined)
+// 窗口动作也记下来。设置页上「用浏览器打开」这类按钮点了之后界面上什么都不变
+// （真实运行时是系统浏览器弹出来），不看报文就没法断言它发对了
+let sentWindowActions = []
+ipcMain.handle('todo:window', (_e, action) => {
+  sentWindowActions.push(action)
+})
 
 // 每段跑完都会 destroy 掉自己的窗口。Electron 默认「窗口全关了 → 退出应用」，
 // 于是第一段一结束整个进程就没了，后面的段连启动的机会都没有（实测：卡在
@@ -830,7 +835,7 @@ async function mainWindowPass() {
       }
     })()
   }))()`)
-  ok('设置页七个分组都在', settings.groups.join('/') === '提醒/倒计时/免打扰/外观与启动/随手记/数据/更新', settings.groups)
+  ok('设置页八个分组都在', settings.groups.join('/') === '提醒/倒计时/免打扰/外观与启动/随手记/数据/更新/关于', settings.groups)
   ok('设置页复选框都渲染了', settings.checks >= 5, settings.checks)
   ok('设置页有「窗口置顶」这一格', settings.labels.includes('窗口置顶'), settings.labels)
   ok('倒计时那组有节假日开关与「只看 N 天」',
@@ -843,6 +848,38 @@ async function mainWindowPass() {
   ok('快捷键状态文案跟着 runtime 走', /注册上了|小窗/.test(settings.hint || ''), settings.hint)
   ok('设置页的时刻也换成了自绘控件（全天 + 免打扰起止）', settings.timeFields === 3 && settings.nativeTime === 0, settings)
   ok('设置页内容比视口长（能滚）', settings.bodyOverflow === true, settings.bodyOverflow)
+
+  // ---- 「关于」那一格 ----
+  // 地址是从 shared/project.ts 来的常量，这里只验它真的摆上了、并且那颗按钮
+  // 发的是 open-repo-page（不是自己去开窗口 —— 渲染层没有开任意 URL 的口）
+  const about = await evalIn(win, `(() => {
+    const f = [...document.querySelectorAll('.field')].find((el) => {
+      const l = el.querySelector('.field__label')
+      return l && l.textContent === '项目主页'
+    })
+    if (!f) return null
+    return {
+      url: (f.querySelector('.mono') || {}).textContent,
+      buttons: [...f.querySelectorAll('button')].map((b) => b.textContent)
+    }
+  })()`)
+  ok('关于那格摆的是本仓库地址',
+    about !== null && about.url === 'https://github.com/FightZhanAng/todo-reminder', about)
+  ok('关于那格给的是「用浏览器打开」',
+    about !== null && about.buttons.join('/') === '用浏览器打开', about)
+
+  sentWindowActions.length = 0
+  await evalIn(win, `(() => {
+    const f = [...document.querySelectorAll('.field')].find((el) => {
+      const l = el.querySelector('.field__label')
+      return l && l.textContent === '项目主页'
+    })
+    f.querySelector('button').click()
+    return 'ok'
+  })()`)
+  await sleep(150)
+  ok('点它发的是 open-repo-page',
+    sentWindowActions.join('/') === 'open-repo-page', sentWindowActions)
 
   // ---- 更新这一格 ----
   // 更新状态**不是设置**，是主进程推的运行时状态。所以这里在主进程侧改 snapshot

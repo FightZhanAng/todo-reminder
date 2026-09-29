@@ -37,7 +37,7 @@ pnpm dev        # 起开发实例
 pnpm build      # 出 out/
 pnpm typecheck  # 主进程 + 渲染层两套配置
 pnpm test:core  # 核心逻辑 814 项
-pnpm smoke      # 界面冒烟 188 项（真开 Electron 点一遍）
+pnpm smoke      # 界面冒烟 191 项（真开 Electron 点一遍）
 pnpm icons      # 从代码重画 resources/icon.ico
 pnpm dist       # 出安装包：release/*-setup.exe（NSIS）+ 同版本便携版 + latest.yml
 ```

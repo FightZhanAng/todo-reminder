@@ -7,7 +7,7 @@ import type { NoticeCenter } from './notices'
 import type { Scheduler } from './scheduler'
 import type { Store } from './store'
 import type { Updater } from './updater'
-import { RELEASES_URL } from '../shared/update'
+import { RELEASES_URL, REPO_URL } from '../shared/project'
 
 export interface AppContext {
   store: Store
@@ -149,6 +149,10 @@ export function registerIpc(ctx: AppContext): void {
         // 便携版唯一的出路。用系统浏览器打开而不是内嵌窗口 ——
         // 用户接下来要下载一个 100MB 的 exe，那件事不该由这个 420px 的小窗承担
         void shell.openExternal(RELEASES_URL)
+        return
+      case 'open-repo-page':
+        // 同上：交给系统浏览器。地址是主进程里的常量，渲染层只说要开哪一个
+        void shell.openExternal(REPO_URL)
         return
       case 'quit':
         app.quit()

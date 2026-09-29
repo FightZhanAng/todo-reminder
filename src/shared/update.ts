@@ -12,16 +12,6 @@
  */
 
 /**
- * 发布页。便携版和「查不到更新」两条路上唯一的出口 —— 那里的用户
- * 只能自己去下新的 exe。
- *
- * **改仓库地址时这里和 `electron-builder.yml` 的 `publish` 要一起改。** electron-builder
- * 会按后者生成包内的 `app-update.yml`（自动更新走它），而这个常量是给
- * 没走自动更新那条路的人用的，两者指向的必须是同一个地方。
- */
-export const RELEASES_URL = 'https://github.com/FightZhanAng/todo-reminder/releases/latest'
-
-/**
  * 更新状态。**不落盘** —— 重启即重置，和 `pausedUntil` 同类。
  *
  * 它记的是「这一版进程此刻认到的事」，写进数据文件只会在下次启动时

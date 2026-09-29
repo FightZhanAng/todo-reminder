@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react'
 import { hotkeyFromEvent, isValidHotkey } from '@shared/hotkey'
+import { REPO_URL } from '@shared/project'
 import type { Settings } from '@shared/types'
 import { updateSummary, type UpdateState } from '@shared/update'
 import type { AppState } from '../useAppState'
@@ -397,6 +398,23 @@ export function SettingsPanel({ state }: { state: AppState }): JSX.Element {
           <span className="field__label">更新状态</span>
           <div className="field__hint">{updateSummary(u)}</div>
           <div className="page__foot">{updateActions(u)}</div>
+        </div>
+
+        <div className="group__label">关于</div>
+
+        <div className="field field--stack">
+          <span className="field__label">项目主页</span>
+          {/* 地址本身要露出来：想给谁发一份、想顺手查一眼代码，复制比点开更快 */}
+          <div className="field__hint mono path">{REPO_URL}</div>
+          <div className="page__foot">
+            <button
+              type="button"
+              className="linkbutton"
+              onClick={() => void window.todo.window('open-repo-page')}
+            >
+              用浏览器打开
+            </button>
+          </div>
         </div>
       </div>
     </div>

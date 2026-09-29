@@ -42,8 +42,17 @@ export const IPC = {
  *
  * `open-download-page` 是给便携版用的：它装不了自动更新（见 shared/update.ts），
  * 只能把人送到发布页去。和 `open-data-dir` 一样是「用系统程序打开某个东西」。
+ *
+ * `open-repo-page` 是设置页「关于」那一格 —— 认领这个程序是从哪儿来的。
+ * 两个开网页的动作分开而不是合成一个 `open-url`：**渲染层不该能指定
+ * 要打开哪个网址**（那等于给了它一个任意 URL 的执行口），所以地址留在主进程。
  */
-export type WindowAction = 'hide' | 'open-data-dir' | 'open-download-page' | 'quit'
+export type WindowAction =
+  | 'hide'
+  | 'open-data-dir'
+  | 'open-download-page'
+  | 'open-repo-page'
+  | 'quit'
 
 /**
  * 托盘菜单能让主窗口切到哪儿。编辑器要带参数（编辑哪条），
