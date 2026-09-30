@@ -341,6 +341,19 @@
    - **别用改名去「挪开」**：`shutil.move` 在 shim 下是「先复制、再送源去回收站」，
      源删不掉就会**凭空留一份拷贝**。把 `release` 改名成 `release-old` 的后果是
      多出 1.1 GB（`release-old/` 加 `release-old/release/` 两份）。
+11. **构建脚本白名单只在 `pnpm-workspace.yaml` 的 `allowBuilds`**（2026-09-30 踩）。
+    pnpm 11 起**不再读 `package.json` 的 `pnpm` 字段**（每条命令都 WARN 一句，值却被整块忽略），
+    所以 `onlyBuiltDependencies` 写在那儿等于没写。没批准时 `pnpm install` 不是警告而是
+    **exit 1**（`ERR_PNPM_IGNORED_BUILDS`），`pnpm dist` 连构建那一步都到不了。
+    另两个反直觉点：
+    - pnpm 自动生成的 `pnpm-workspace.yaml` 模板里填的是占位文本
+      （`esbuild: set this to true or false`），**不填成真 false / true 就一直报错**。
+      本项目只有两个包有构建脚本：`esbuild`（要 true）、`electron-winstaller`（要 false，
+      它只服务 Squirrel.Windows，这里出的是 NSIS）。`electron` 和 `electron-builder` 根本没有脚本。
+    - **electron 43 的 npm 包已经没有 install 脚本了**，改成 `require('electron')` 时懒下载。
+      所以 `node_modules/electron/dist` 空掉**不影响 `pnpm dist`**（electron-builder 自己拉 electron），
+      只影响 `pnpm smoke`。补回来跑 `node node_modules/electron/install.js` ——
+      `%LOCALAPPDATA%\electron\Cache` 里已有 `electron-v43.3.0-win32-x64.zip`，不用联网。
 
 ## 文件卫生
 

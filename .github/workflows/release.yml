@@ -21,7 +21,9 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          # 与本机同大版本：pnpm 11 起构建脚本白名单只认 pnpm-workspace.yaml 的 allowBuilds，
+          # 留在 10 会让两边各读各的配置
+          version: 11
 
       - uses: actions/setup-node@v4
         with:
