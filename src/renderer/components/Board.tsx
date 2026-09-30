@@ -162,7 +162,8 @@ export function Board({ state }: { state: AppState }): JSX.Element {
         )}
       </div>
       {/* 新建入口放在底栏上方正中：加东西是这个应用里最高频的动作，
-          顶栏那个角落留给设置 */}
+          顶栏那个角落留给设置。
+          按钮里那枚 `N` 是键帽 —— 快捷键讲在人会去看的地方，比写在设置页里有用 */}
       <div className="addbar">
         <button
           type="button"
@@ -172,6 +173,9 @@ export function Board({ state }: { state: AppState }): JSX.Element {
           onClick={() => state.go({ name: 'edit', id: null, kind: 'deadline' })}
         >
           + 记一件
+          <span className="addbar__key" aria-hidden="true">
+            N
+          </span>
         </button>
       </div>
       <BottomBar state={state} />
@@ -180,11 +184,17 @@ export function Board({ state }: { state: AppState }): JSX.Element {
 }
 
 /**
- * 顶栏。整张界面唯一的主角是**今天这个日子**，所以它拿到最大的字号：
- * 「九月」是一枚宽字距的小标签，「18」是 30px 的宋体，周五缀在基线右侧。
+ * 表头是一块**读数带**。
  *
- * 第二行是一条账目式的状态：现在几点 · 还剩几件 · 逾期几件。
- * 「还剩 0 件」这一档不出现 —— 那句话说在空状态的大字里更合适。
+ * 上面一行是今天这个日子：整张界面唯一的主角，所以它拿到最大的字号，
+ * 而且是等宽加粗的 —— 「九月」是给它当单位说明的铭牌，「周五」缀在右侧。
+ *
+ * 下面一行是三个**铭牌标签 + 等宽读数**，靠发丝线分格。原来是「20:53 ·
+ * 还剩 4 件 逾期 3」那样一句话：读得出，但读不快 —— 三个数混在一行小字里，
+ * 一眼扫不到哪个才是自己该在意的。
+ *
+ * 「还剩 0 件」这一档不出现（那句话说在空状态里更合适）。格子少的时候
+ * 几何也不会跟着歪：读数带是固定三轨的 grid。
  */
 function Head({
   state,
@@ -255,16 +265,27 @@ function Head({
         </div>
       </div>
 
-      <div className="head__status">
-        <span className="head__clock">{formatClock(state.now)}</span>
+      {/* 读数带：现在 / 还剩 / 逾期。`head__late` 挂在逾期那一格上 ——
+          整格转朱砂（标签和读数一起），只说数字染红的话，「逾期」两个字
+          还是灰的，扫一眼会以为那是「还剩」 */}
+      <dl className="readout">
+        <div className="readout__cell">
+          <dt className="readout__label">现在</dt>
+          <dd className="readout__value">{formatClock(state.now)}</dd>
+        </div>
         {remaining > 0 && (
-          <>
-            <span className="head__sep">·</span>
-            <span>还剩 {remaining} 件</span>
-          </>
+          <div className="readout__cell">
+            <dt className="readout__label">还剩</dt>
+            <dd className="readout__value">{remaining}</dd>
+          </div>
         )}
-        {overdue > 0 && <span className="head__late">逾期 {overdue}</span>}
-      </div>
+        {overdue > 0 && (
+          <div className="readout__cell head__late">
+            <dt className="readout__label">逾期</dt>
+            <dd className="readout__value">{overdue}</dd>
+          </div>
+        )}
+      </dl>
     </header>
   )
 }
@@ -393,16 +414,17 @@ function BottomBar({ state }: { state: AppState }): JSX.Element {
   return (
     <footer className="bottombar">
       {/* 三个入口都常驻显示，计数为 0 也不藏 —— 一个会消失的导航入口
-          比一个「已完成 · 0 件」更难找 */}
+          比一个「已完成 · 0 件」更难找。计数用等宽：三个数字竖着对齐，
+          这一段才读得像一条状态栏而不是三句话 */}
       <div className="bottombar__links">
         <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'inbox' })}>
-          收件箱 · {inboxCount} 件
+          收件箱 · <span className="mono">{inboxCount}</span> 件
         </button>
         <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'future' })}>
-          以后 · {futureCount} 件
+          以后 · <span className="mono">{futureCount}</span> 件
         </button>
         <button type="button" className="bottombar__link" onClick={() => state.go({ name: 'done' })}>
-          已完成 · {doneTotal} 件
+          已完成 · <span className="mono">{doneTotal}</span> 件
         </button>
       </div>
       {notifyOff ? (

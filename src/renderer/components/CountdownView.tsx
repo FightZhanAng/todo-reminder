@@ -21,10 +21,14 @@ import type { AppState } from '../useAppState'
  * **没公布的年份这里不猜** —— 界面明说「还没公布」，而不是按规则推一个
  * 似是而非的日期：推错了用户会照着去请假。
  *
- * ## 纪念日只倒数，不提醒
+ * ## 纪念日默认只倒数，想被提醒得自己勾
  *
- * 它没有「完成」这个动作，也不该在生日当天早上弹一条通知逼你处理。
- * 界面上把这句话写清楚，免得有人等通知等不到。
+ * 它没有「完成」这个动作，所以不该在生日当天早上弹一条通知逼你处理 ——
+ * 也正因为如此，新建一条纪念日时那个勾是**不打**的，想要的人自己去勾
+ * 「到那天提醒我」。
+ *
+ * 勾了之后也只是那天说一句「就是今天」，通知上只有一颗「打开倒计时」——
+ * 不给它配那三颗动作按钮，因为没有哪一颗对一条生日是有意义的。
  */
 export function CountdownView({ state }: { state: AppState }): JSX.Element {
   const { now } = state
@@ -172,7 +176,7 @@ export function CountdownView({ state }: { state: AppState }): JSX.Element {
         )}
 
         <div className="cal__note">
-          节假日按国务院办公厅的通知（已收录到 {LATEST_KNOWN_YEAR} 年）；纪念日只倒数，不弹通知
+          节假日按国务院办公厅的通知（已收录到 {LATEST_KNOWN_YEAR} 年）；纪念日默认只倒数，勾了「到那天提醒我」的才弹通知
         </div>
       </div>
     </div>
@@ -224,6 +228,9 @@ function AnniversaryForm({
   const [date, setDate] = useState(editing?.date ?? dayKey(state.now))
   const [yearly, setYearly] = useState(editing?.yearly ?? true)
   const [lunar, setLunar] = useState(editing?.lunar ?? false)
+  // 默认不勾：记一条纪念日不该顺带改变「这台电脑会不会在早上响一下」。
+  // 老文件里没有这个字段的，normalizeAnniversary 也补成 false（见 store.ts）
+  const [notify, setNotify] = useState(editing?.notify ?? false)
   const [confirming, setConfirming] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
 
@@ -241,7 +248,7 @@ function AnniversaryForm({
       return
     }
     setProblem(null)
-    const draft = { title, date, yearly, lunar: yearly && lunar }
+    const draft = { title, date, yearly, lunar: yearly && lunar, notify }
     if (form.mode === 'add') {
       void state.run({ type: 'anniversary:add', draft })
       state.setFlash('已记下')
@@ -325,6 +332,28 @@ function AnniversaryForm({
             : '每年到这一天倒数'}
         {leapWarning && '（这条记在闰月里，平年按同月同日过）'}
       </div>
+
+      {/* 提醒排在「怎么重复」之后：前面几格都在回答「那天是哪天」，
+          这一格是这条纪念日**唯一**会发生的外部动作 */}
+      <div className="field">
+        <span className="field__label">提醒</span>
+        <span className="field__control">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={notify}
+              onChange={(e) => setNotify(e.target.checked)}
+            />
+            到那天提醒我
+          </label>
+        </span>
+      </div>
+
+      {notify && (
+        <div className="field__hint">
+          到那天按设置里那个「全天提醒」时刻弹一条，现在是 {snapshot.settings.allDayRemindTime}
+        </div>
+      )}
 
       {problem !== null && <div className="field__hint field__hint--warn">{problem}</div>}
 

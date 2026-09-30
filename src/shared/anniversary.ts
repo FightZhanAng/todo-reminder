@@ -1,14 +1,14 @@
 import { tsFromDayKey } from './calendar'
 import { lunarOf, solarFromLunar } from './lunar'
-import { dayIndex, dayKey, startOfDay } from './time'
-import type { Anniversary } from './types'
+import { atTimeOfDay, dayIndex, dayKey, startOfDay } from './time'
+import type { Anniversary, Settings } from './types'
 
 /**
- * 纪念日。**它不是待办** —— 没有「完成」这个动作，也不提醒，
- * 只是「离那天还有多久」这件事本身。
+ * 纪念日。**它不是待办** —— 没有「完成」这个动作，
+ * 只有「离那天还有多久」这件事本身，外加一句「到那天要不要说一声」。
  *
  * 所以它不挂在 `Task` 上：`Task` 的每一种都属于「要做的事」，
- * 共享着 `completedAt` / `firedFor` / 提醒时刻那一整套字段。
+ * 共享着 `completedAt` / `deletedAt` / `kind` / 软删与撤销那一整套字段。
  * 硬塞进去的结果是每个关于待办的分支都要先排除它一次。
  *
  * ## 两种重复
@@ -136,4 +136,81 @@ export function anniversaryInLeapMonth(a: Anniversary): boolean {
   const ts = tsFromDayKey(a.date)
   if (ts === null) return false
   return lunarOf(ts)?.isLeap === true
+}
+
+/**
+ * 一条到点的纪念日。
+ *
+ * `at` 是提醒点（那一刻），`day` 是幂等键（那一天）—— 两个都要，因为
+ * 幂等是**按天**算的而排序、去重、触发判据都是按刻算的。把它们合成一个
+ * 字段会让「09:00 弹过、11:00 改了提醒时刻」这条路径上的语义变得说不清。
+ */
+export interface AnniversaryEntry {
+  anniversary: Anniversary
+  /** 该弹的提醒点：发生那天的「全天提醒时刻」 */
+  at: number
+  /** 那一天零点的 ts。`firedFor` 比的就是它 */
+  day: number
+  /** 那一刻算出来的发生情况 —— 通知文案直接用这份，免得两处各算一遍各说各话 */
+  occurrence: AnniversaryOccurrence
+}
+
+/**
+ * 纪念日的提醒点。
+ *
+ * 复用设置里那个「全天提醒时刻」，**不给纪念日单独一个时刻**：它和全天型
+ * 待办本来就是同一件事（只有日期没有时刻），再多一个设置项只会让人在两个
+ * 地方各调一次。
+ *
+ * 返回值可能是过去也可能是将来（与 `remindAtOf` 同型），由调用方按
+ * 「≤ now」过滤 —— 所以这里不判断「该不该现在弹」，只回答「下一次是几点」。
+ */
+export function anniversaryRemindAt(
+  a: Anniversary,
+  settings: Settings,
+  now: number
+): { at: number; day: number; occurrence: AnniversaryOccurrence } | null {
+  if (!a.notify) return null
+
+  const occurrence = anniversaryOccurrence(a, now)
+  if (occurrence === null) return null
+  // 一次性纪念日过完就完了。负数只可能出现在它身上 ——
+  // 每年重复的永远返回「下一次」，不会给负数
+  if (occurrence.daysLeft < 0) return null
+
+  const dayTs = tsFromDayKey(occurrence.at)
+  if (dayTs === null) return null
+
+  return { at: atTimeOfDay(dayTs, settings.allDayRemindTime), day: dayTs, occurrence }
+}
+
+/**
+ * 挑出此刻该弹的纪念日。三条过滤规则：
+ *   1. 提醒点必须 ≤ now
+ *   2. 提醒点必须晚于创建时间 —— 与任务同一条：今天下午新建一条「今天」的
+ *      纪念日，不该被自己早上那个提醒点打脸
+ *   3. 那一天还没弹过（比 `firedFor`，比的是**天**不是刻）
+ *
+ * ## 与任务那边唯一的、也是刻意的差别：没有「错过」这一档
+ *
+ * 纪念日说的是一整天（「今天就是那天」），不是某一刻。早上九点没开机、
+ * 十一点才开，这条仍然该弹，而且该当成「刚到的」直接弹。所以这里不做
+ * `MISS_GRACE_MS` 的切分，命中的一律走新鲜批次，也**不会**被揉进
+ * 「有 N 件事错过了」那条聚合通知里 —— 把生日说成「错过了」是错的。
+ */
+export function dueAnniversaries(
+  list: readonly Anniversary[],
+  settings: Settings,
+  now: number
+): AnniversaryEntry[] {
+  const out: AnniversaryEntry[] = []
+  for (const a of list) {
+    const hit = anniversaryRemindAt(a, settings, now)
+    if (hit === null) continue
+    if (hit.at > now) continue
+    if (hit.at <= a.createdAt) continue
+    if (hit.day === a.firedFor) continue
+    out.push({ anniversary: a, at: hit.at, day: hit.day, occurrence: hit.occurrence })
+  }
+  return out.sort((x, y) => x.at - y.at)
 }

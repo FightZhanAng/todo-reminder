@@ -20,7 +20,7 @@
  *
  * ## 产物
  *
- * `.workbuddy/preview/{calendar,countdown,settings}-{light,dark}.png`
+ * `.workbuddy/preview/{board,calendar,countdown,countdown-form,settings-top,settings}-{light,dark}.png`
  * 放这儿不放 `.tmp-shot/`：那类 `.tmp-*` 是随手就清的临时目录，这几张是给人看的交付物。
  *
  * ## 两个必须记住的坑（都在下面代码里体现）
@@ -91,14 +91,17 @@ const snapshot = {
   anniversaries: [
     {
       id: 'ann-once', title: '术后复查', date: dayKeyOf(startOfToday + 20 * 86_400_000),
-      yearly: false, lunar: false, createdAt: now - 8 * 86_400_000, updatedAt: now
+      yearly: false, lunar: false, notify: false, firedFor: null,
+      createdAt: now - 8 * 86_400_000, updatedAt: now
     },
     {
       id: 'ann-mom', title: '妈妈生日', date: '1968-03-12', yearly: true, lunar: false,
+      notify: false, firedFor: null,
       createdAt: now - 10 * 86_400_000, updatedAt: now
     },
     {
       id: 'ann-lunar', title: '外婆生日', date: '1990-09-24', yearly: true, lunar: true,
+      notify: false, firedFor: null,
       createdAt: now - 9 * 86_400_000, updatedAt: now
     }
   ],
@@ -164,6 +167,10 @@ app.whenReady().then(async () => {
   win.webContents.send('todo:snapshot', snapshot)
   await sleep(800)
 
+  // 看板是默认视图，进来就是它 —— 顶栏大号日期、四段分段标签、竖轴刻度都在这一屏。
+  // 它排在第一个拍：后面几步会翻页 / 跳视图，回不来才是常态
+  await shot('board')
+
   // 日历 → 翻到 2026 年 二月 → 选中 2/17（春节里的一天，当天还有件逾期的）
   await go(`([...document.querySelectorAll('.head__actions .iconbutton')][0].click(), 'ok')`)
   await sleep(400)
@@ -191,11 +198,29 @@ app.whenReady().then(async () => {
   await sleep(400)
   await shot('countdown')
 
-  // 设置页（含「更新」那一组：当前版本 / 自动更新开关 / 更新状态）。
-  // 用 `todo:open-view` 而不是点顶栏那枚图标 —— 和 `pnpm smoke` 走同一条路，
-  // 区别只是这里开的是真窗口、要的是图。
+  // 倒计时 + 加纪念日的表单（勾上「到那天提醒我」那一格）：
+  // 这一屏要单独拍 —— 表单不打开就看不到新加的那一格，
+  // 而窄窗里最会出问题的恰恰是「表单又长了一行」
+  await go(`(document.querySelector('.topbar__actions .iconbutton').click(), 'ok')`)
+  await sleep(400)
+  await go(`(() => {
+    const box = [...document.querySelectorAll('.annform .check')]
+      .filter((e) => /提醒我/.test(e.textContent || ''))[0]
+    box.querySelector('input').click()
+    return 'ok'
+  })()`)
+  await sleep(300)
+  await shot('countdown-form')
+
+  // 设置页。两张：顶部（启动 / 通知 / 声音 / **全天提醒那一格** —— 纪念日的
+  // 提醒时刻就是复用它，改了那句说明得能一眼看见有没有被挤成两行）和底部
+  // （更新 / 关于那两格）。用 `todo:open-view` 而不是点顶栏那枚图标 ——
+  // 和 `pnpm smoke` 走同一条路，区别只是这里开的是真窗口、要的是图。
   win.webContents.send('todo:open-view', 'settings')
   await sleep(400)
+  await go(`(document.querySelector('.page__body').scrollTop = 0, 'ok')`)
+  await sleep(200)
+  await shot('settings-top')
   await go(`(document.querySelector('.page__body').scrollTop = 1e6, 'ok')`)
   await sleep(200)
   await shot('settings')

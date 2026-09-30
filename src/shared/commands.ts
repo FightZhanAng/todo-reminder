@@ -2,7 +2,8 @@ import { actionPatch, type TaskAction } from './actions'
 import { tsFromDayKey } from './calendar'
 import { atTimeOfDay, startOfDay } from './time'
 import type {
-  Anniversary, DeadlineTask, RecurrenceRule, RecurringTask, Settings, SomedayTask, Task, TaskPatch
+  Anniversary, AnniversaryEdit, DeadlineTask, RecurrenceRule, RecurringTask,
+  Settings, SomedayTask, Task, TaskPatch
 } from './types'
 
 export type TaskKind = 'deadline' | 'recurring' | 'someday'
@@ -52,6 +53,14 @@ export interface AnniversaryDraft {
   yearly: boolean
   /** 按农历月日数 */
   lunar: boolean
+  /**
+   * 到那天提醒我。
+   *
+   * 默认 false 由界面那边给（新建时那条勾不打）：记一条纪念日不该顺带
+   * 改变「这台电脑会不会在早上响一下」。命令层不替谁定默认值 —— 它只负责
+   * 把草稿照字面组装，「想要什么默认」是界面自己的声明。
+   */
+  notify: boolean
 }
 
 export type Command =
@@ -78,10 +87,11 @@ export interface CommandStore {
   updateTask(id: string, patch: TaskPatch): unknown
   replaceTask(task: Task): Task | null
   addAnniversary(item: Anniversary): unknown
-  updateAnniversary(
-    id: string,
-    patch: Partial<Pick<Anniversary, 'title' | 'date' | 'yearly' | 'lunar'>>
-  ): Anniversary | null
+  /**
+   * 白名单是 `AnniversaryEdit`（见 shared/types）—— 里面**没有** `firedFor`。
+   * 命令层不该有办法替调度器记账，也不该有办法把「今天别弹了」写成一次保存。
+   */
+  updateAnniversary(id: string, patch: Partial<AnniversaryEdit>): Anniversary | null
   removeAnniversary(id: string): boolean
   patchSettings(patch: Partial<Settings>): unknown
   newId(): string
@@ -192,6 +202,11 @@ export function buildAnniversary(
     yearly: draft.yearly,
     // 只数一次的日子没有「按什么历」这一说，存 false 免得将来切换语义时被误读
     lunar: draft.yearly ? draft.lunar : false,
+    notify: draft.notify,
+    // `firedFor` 一律给 null —— 这是「新记的一条」的组装。
+    // 编辑路径只从这个返回值里取 title/date/yearly/lunar/notify 五个字段，
+    // **刻意不回填它**：回填了，改个名字就会让今天已经弹过的那条重弹一次。
+    firedFor: null,
     createdAt,
     updatedAt: now
   }
@@ -340,11 +355,14 @@ function route(store: CommandStore, cmd: Command, now: number): CommandResult {
       // 只在那一处判断，编辑路径照抄一遍迟早漏一条
       const next = buildAnniversary(cmd.draft, now, old.id, old.createdAt)
       if (next === null) return invalid('纪念日的名字和日期都得填对')
+      // `firedFor` 不在这里 —— 编辑不该动提醒账（见 buildAnniversary 里的说明）：
+      // 改个名字就重弹一次，是最容易被当成「应用有 bug」的那种行为
       if (store.updateAnniversary(old.id, {
         title: next.title,
         date: next.date,
         yearly: next.yearly,
-        lunar: next.lunar
+        lunar: next.lunar,
+        notify: next.notify
       }) === null) {
         return invalid(`纪念日不存在：${cmd.id}`)
       }

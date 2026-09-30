@@ -1,5 +1,6 @@
+import { daysLeftLabel, yearsLabel, type AnniversaryOccurrence } from './anniversary'
 import type { DueEntry } from './remind'
-import type { RemindableTask } from './types'
+import type { Anniversary, RemindableTask } from './types'
 
 /**
  * 单条通知的文案。措辞规范（规格 §9.6）：只往正向走 ——
@@ -11,6 +12,26 @@ export function describeTask(
   now: number
 ): { title: string; body: string } {
   return { title: task.title, body: describeWhen(task, at, now) }
+}
+
+/**
+ * 纪念日的通知文案。
+ *
+ * 与上面那条同一个取向（只往正向走），但**只有一档**：纪念日谈的是一整天，
+ * 到点的那一刻就是那天本身，所以没有「还有 30 分钟」，也没有「已逾期」。
+ *
+ * `occurrence` 由调用方传进来，而不是在这里重算一遍 —— 这样通知里说的话
+ * 与用户在倒计时页上看到的那一行必然是同一句。
+ */
+export function describeAnniversary(
+  a: Anniversary,
+  occurrence: AnniversaryOccurrence
+): { title: string; body: string } {
+  const parts = [daysLeftLabel(occurrence.daysLeft)]
+  const years = yearsLabel(occurrence.years)
+  if (years !== null) parts.push(years)
+  if (occurrence.lunarLabel !== null) parts.push(occurrence.lunarLabel)
+  return { title: a.title, body: parts.join(' · ') }
 }
 
 function describeWhen(task: RemindableTask, at: number, now: number): string {

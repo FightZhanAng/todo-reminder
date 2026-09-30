@@ -7,7 +7,8 @@ import { dirname } from 'node:path'
 import { DEFAULT_SETTINGS, FILE_VERSION } from '../shared/defaults'
 import { tsFromDayKey } from '../shared/calendar'
 import type {
-  Anniversary, Persisted, RecurrenceRule, Settings, Task, TaskPatch, Weekday
+  Anniversary, AnniversaryPatch, Persisted, RecurrenceRule,
+  Settings, Task, TaskPatch, Weekday
 } from '../shared/types'
 
 /** 软删的任务留这么久，之后彻底清掉 —— 见 Store.purgeDeleted 的说明 */
@@ -298,16 +299,34 @@ export class Store {
     return item
   }
 
-  updateAnniversary(
-    id: string,
-    patch: Partial<Pick<Anniversary, 'title' | 'date' | 'yearly' | 'lunar'>>
-  ): Anniversary | null {
-    const index = this.data.anniversaries.findIndex((a) => a.id === id)
-    if (index < 0) return null
-    const merged: Anniversary = { ...this.data.anniversaries[index]!, ...patch, updatedAt: Date.now() }
-    this.data.anniversaries[index] = merged
-    this.flush()
-    return merged
+  /**
+   * 一批纪念日只写一次盘。理由与 `updateTasks` 完全相同：逐条走
+   * `updateAnniversary` 时，一条就是一次全量重写 + fsync，而
+   * `Scheduler.markAnniversaryFired` 正是「一批到点的纪念日逐条回填」的形状。
+   *
+   * 找不到的 id 静默跳过（与 `updateTasks` 一致），调用方按返回的数组长度
+   * 判断有没有写进去。
+   */
+  updateAnniversaries(patches: readonly { id: string; patch: AnniversaryPatch }[]): Anniversary[] {
+    const out: Anniversary[] = []
+    for (const { id, patch } of patches) {
+      const index = this.data.anniversaries.findIndex((a) => a.id === id)
+      if (index < 0) continue
+      const merged: Anniversary = {
+        ...this.data.anniversaries[index]!,
+        ...patch,
+        updatedAt: Date.now()
+      }
+      this.data.anniversaries[index] = merged
+      out.push(merged)
+    }
+    if (out.length > 0) this.flush()
+    return out
+  }
+
+  updateAnniversary(id: string, patch: AnniversaryPatch): Anniversary | null {
+    const [merged] = this.updateAnniversaries([{ id, patch }])
+    return merged ?? null
   }
 
   removeAnniversary(id: string): boolean {
@@ -454,6 +473,10 @@ export function normalizeTask(value: unknown): Task | null {
  * （`tsFromDayKey` 用回写比对挡住了这一条，所以这里直接复用它，
  * 而不是自己再写一遍正则）。日期不合法就整条丢掉，而不是留一条
  * 永远算不出倒计时的记录。
+ *
+ * `notify` 与 `firedFor` 是 v4 才有的、**老文件里根本没有**，所以它们是上面
+ * 那条规则之外的例外：缺了就补默认值，而不是拒绝整条 —— 升级一次就让用户
+ * 攒了几年的纪念日全部消失，是这份文件里最贵的一种错误。
  */
 export function normalizeAnniversary(value: unknown): Anniversary | null {
   if (value === null || typeof value !== 'object') return null
@@ -465,12 +488,21 @@ export function normalizeAnniversary(value: unknown): Anniversary | null {
   if (typeof a.yearly !== 'boolean' || typeof a.lunar !== 'boolean') return null
   if (!isNum(a.createdAt) || !isNum(a.updatedAt)) return null
 
+  // `notify` 缺省给 false 而不是 true：给 true 的话，所有老纪念日会在升级后
+  // 的第一个早上集体开炮，而用户从没答应过要收这些通知。
+  // `firedFor` 缺省给 null（没弹过）；给了个既不是数字也不是 null 的值，
+  // 当作没弹过 —— 它只影响「会不会多弹一条」，不该让整条记录作废。
+  const notify = a.notify === true
+  const firedFor = isNumOrNull(a.firedFor) ? a.firedFor : null
+
   return {
     id: a.id,
     title: a.title,
     date: a.date,
     yearly: a.yearly,
     lunar: a.lunar,
+    notify,
+    firedFor,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt
   }

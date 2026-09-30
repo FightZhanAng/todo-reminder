@@ -95,7 +95,7 @@ export function SettingsPanel({ state }: { state: AppState }): JSX.Element {
               onChange={(v) => patch({ allDayRemindTime: v })}
               label="全天提醒时刻"
             />
-            <span className="unit">全天任务在这时提醒</span>
+            <span className="unit">全天任务和纪念日在这时提醒</span>
           </span>
         </div>
 

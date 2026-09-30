@@ -34,9 +34,9 @@ import { dueNow, isRemindable, remindAtOf } from '../src/shared/remind'
 import { groupMissed, groupToday } from '../src/shared/group'
 import { inQuietHours } from '../src/shared/quiet'
 import { ACTION_ORDER, actionLabel, actionPatch } from '../src/shared/actions'
-import { missedTag, parseActivation, taskTag } from '../src/shared/activation'
+import { anniversaryTag, missedTag, parseActivation, taskTag } from '../src/shared/activation'
 import { buildToastXml } from '../src/shared/toastXml'
-import { describeTask, missedSummary } from '../src/shared/notifyText'
+import { describeAnniversary, describeTask, missedSummary } from '../src/shared/notifyText'
 import {
   TRAY_ICON_SCALE,
   TRAY_ICON_SIZE,
@@ -732,7 +732,11 @@ console.log('\n--- scheduler.ts ---')
 
 console.log('\n--- 承重常量（静默改值 typecheck 抓不到）---')
 {
-  check('FILE_VERSION = 3（v2 加 anniversaries，v3 加 autoUpdate）', FILE_VERSION, 3)
+  check(
+    'FILE_VERSION = 4（v2 加 anniversaries，v3 加 autoUpdate，v4 加纪念日的 notify/firedFor）',
+    FILE_VERSION,
+    4
+  )
   check('TICK_MS = 10 秒', TICK_MS, 10_000)
   check('MISS_GRACE_MS = 10 分钟', MISS_GRACE_MS, 600_000)
   check('DEFAULT_LEAD_MIN = 15', DEFAULT_LEAD_MIN, 15)
@@ -1713,6 +1717,7 @@ console.log('\n--- future.ts（以后这本账）---')
 
   check('标签：task 用冒号分段', taskTag(id, at), `task:${id}:${at}`)
   check('标签：missed 同理', missedTag(id, at), `missed:${id}:${at}`)
+  check('标签：anniversary 同理', anniversaryTag(id, at), `anniversary:${id}:${at}`)
 
   // check 是 === 比较，对象一律先序列化再比
   const shape = (v: unknown): string => JSON.stringify(v)
@@ -1729,6 +1734,24 @@ console.log('\n--- future.ts（以后这本账）---')
     '激活：点正文只唤起窗口',
     shape(parseActivation({ type: 'click', arguments: `type=click&tag=${taskTag(id, at)}` })),
     shape({ kind: 'open', taskId: id })
+  )
+  // 纪念日：前缀就定了去向，**不去读 actionIndex** ——
+  // 读了的话，那颗同在下标 0 的按钮会被当成「完成」并落到某条任务头上
+  check(
+    '激活：纪念日那颗按钮 → 切到倒计时',
+    shape(
+      parseActivation({
+        type: 'action',
+        actionIndex: 0,
+        arguments: `type=action&action=0&tag=${anniversaryTag(id, at)}`
+      })
+    ),
+    shape({ kind: 'countdown' })
+  )
+  check(
+    '激活：纪念日正文那一下 → 也切到倒计时',
+    shape(parseActivation({ type: 'click', arguments: `type=click&tag=${anniversaryTag(id, at)}` })),
+    shape({ kind: 'countdown' })
   )
   check(
     '激活：tag 被 URL 编码过也能认',
@@ -1850,6 +1873,33 @@ console.log('\n--- future.ts（以后这本账）---')
     shape({ kind: 'open', taskId: id })
   )
 
+  // 纪念日那颗「打开倒计时」同样落在下标 0，靠 anniversary: 前缀区分。
+  // 这条断言是必须的：万一有人按 ACTION_ORDER[0] 去解释它，点一下会把某条
+  // 任务标成「完成」—— 一个在界面上完全看不见的破坏
+  const annXml = buildToastXml({
+    tag: anniversaryTag(id, at),
+    title: '妈妈生日',
+    body: '就是今天 · 第 58 周年',
+    buttons: ['打开倒计时'],
+    silent: true
+  })
+  check(
+    'toast：纪念日那颗按钮切到倒计时',
+    shape(
+      parseActivation({
+        type: 'action',
+        actionIndex: 0,
+        arguments: attrOf(annXml, 'arguments')[0]!
+      })
+    ),
+    shape({ kind: 'countdown' })
+  )
+  check(
+    'toast：纪念日正文那一下也切到倒计时',
+    shape(parseActivation({ type: 'click', arguments: attrOf(annXml, 'launch')[0]! })),
+    shape({ kind: 'countdown' })
+  )
+
   check('toast：静音写 audio silent', xml.includes('<audio silent="true"/>'), true)
   const loud = buildToastXml({ tag, title: '交房租', body: '', buttons: ['完成'], silent: false })
   check('toast：不静音就不写 audio', loud.includes('<audio'), false)
@@ -1881,8 +1931,8 @@ import {
   holidayPositionOf, holidayYearKnown, isRestDay, makeupFor, nextHoliday, upcomingHolidays
 } from '../src/shared/holiday'
 import {
-  anniversaryInLeapMonth, anniversaryOccurrence, daysLeftLabel,
-  sortAnniversaries, yearsLabel
+  anniversaryInLeapMonth, anniversaryOccurrence, anniversaryRemindAt, daysLeftLabel,
+  dueAnniversaries, sortAnniversaries, yearsLabel, type AnniversaryEntry
 } from '../src/shared/anniversary'
 import { collectCountdowns, fullDate, holidaySpanLabel, shortDate } from '../src/shared/countdown'
 import { agendaOfDay, monthAgenda, tasksOnDay } from '../src/shared/agenda'
@@ -1895,6 +1945,9 @@ function anniversary(patch: Partial<Anniversary> = {}): Anniversary {
     date: '2015-05-20',
     yearly: true,
     lunar: false,
+    // 默认不提醒 —— 与界面新建时那个勾的默认值一致（见 AnniversaryForm 的 state）
+    notify: false,
+    firedFor: null,
     createdAt: at(2026, 9, 29, 10, 0),
     updatedAt: at(2026, 9, 29, 10, 0),
     ...patch
@@ -2170,6 +2223,139 @@ console.log('\n--- 纪念日 ---')
   check('最近的排最前', sorted.map((a) => a.id).join(','), 'today,near,far')
 }
 
+console.log('\n--- 纪念日的提醒（按天论，不按刻论）---')
+{
+  const now = at(2026, 9, 29, 10, 0)
+  const today = startOfDay(now)
+
+  // 没勾「到那天提醒我」→ 根本没有提醒点。这是默认状态
+  check('没勾提醒 → 没有提醒点', anniversaryRemindAt(anniversary(), S, now), null)
+
+  // 勾了，但那天还没到 → 提醒点在将来，此刻不弹
+  check(
+    '勾了但日子没到 → 此刻不弹',
+    dueAnniversaries([anniversary({ date: '2026-12-25', yearly: false, notify: true })], S, now).length,
+    0
+  )
+
+  // 就是今天。createdAt 往前挪到 9 月 1 日 —— 当天新建的会被
+  // 「提醒点必须晚于创建时间」那条挡掉，那一条下面单独测
+  const todayAnn = anniversary({
+    date: '2015-09-29', notify: true, createdAt: at(2026, 9, 1, 8, 0)
+  })
+  const hit = dueAnniversaries([todayAnn], S, now)
+  check('就是今天 → 该弹', hit.length, 1)
+  check('提醒点是当天 09:00（与全天型待办共用一个时刻）', hit[0]?.at, at(2026, 9, 29, 9, 0))
+  check('幂等键是那一天，不是那一刻', hit[0]?.day, today)
+  check('通知文案直接用那一份备好的发生情况', hit[0]?.occurrence.daysLeft, 0)
+
+  // 幂等按天：09:00 弹过之后，同一天把提醒时刻改到 11:00 也不该再弹一遍。
+  // 这正是 firedFor 存「天」而不是存「刻」的理由
+  const fired = anniversary({
+    date: '2015-09-29', notify: true, firedFor: today, createdAt: at(2026, 9, 1, 8, 0)
+  })
+  check('那天弹过 → 同日不再弹', dueAnniversaries([fired], S, at(2026, 9, 29, 23, 59)).length, 0)
+  check(
+    '同日改了提醒时刻也不再弹（按天论）',
+    dueAnniversaries([fired], { ...S, allDayRemindTime: '11:00' }, at(2026, 9, 29, 23, 59)).length,
+    0
+  )
+
+  // 「当天一整天都算数」：早上九点没开机、下午三点才开，仍然该弹
+  check('下午才开机也照样弹', dueAnniversaries([todayAnn], S, at(2026, 9, 29, 15, 0)).length, 1)
+
+  // 但当天新建的不能弹 —— 与任务那条「提醒点必须晚于创建时间」同源
+  check(
+    '当天下午才记的，不该被自己早上那个提醒点打脸',
+    dueAnniversaries(
+      [anniversary({ date: '2015-09-29', notify: true, createdAt: at(2026, 9, 29, 15, 0) })],
+      S,
+      at(2026, 9, 29, 16, 0)
+    ).length,
+    0
+  )
+
+  // 一次性纪念日过完就完了，明年不会再冒出来
+  check(
+    '一次性纪念日过完不再提醒',
+    anniversaryRemindAt(anniversary({ date: '2025-01-01', yearly: false, notify: true }), S, now),
+    null
+  )
+
+  // 农历纪念日：提醒点落在当年那个农历日子上，不是锚点那串公历数字
+  const lunarAnn = anniversary({ date: '1990-09-24', lunar: true, notify: true })
+  const lunarHit = anniversaryRemindAt(lunarAnn, S, now)
+  check(
+    '农历纪念日的提醒点落在农历那一天的零点上',
+    lunarHit === null ? null : dayKey(lunarHit.day),
+    anniversaryOccurrence(lunarAnn, now)!.at
+  )
+}
+
+console.log('\n--- 纪念日的提醒：穿过调度器那一趟 ---')
+{
+  // 上面几条测的是 `dueAnniversaries` 这个纯函数，这一条测的是**接线**：
+  // `tick` 有没有把它取上、`markAnniversaryFired` 标的是「天」还是「刻」。
+  // 后者是这套东西里最容易悄悄错的一处 —— 标成刻的话，「弹过之后同一天改一下
+  // 提醒时刻」就会重弹一遍，而单测 `dueAnniversaries` 永远看不见它。
+  const dir = mkdtempSync(join(tmpdir(), 'todo-ann-sched-'))
+  const store = new Store(join(dir, 'a.json'))
+  const now = at(2026, 9, 29, 10, 0)
+  store.addAnniversary(
+    anniversary({
+      id: 'ann1',
+      date: '2026-09-29',
+      yearly: false,
+      notify: true,
+      createdAt: at(2026, 9, 1, 8, 0)
+    })
+  )
+
+  let clock = now
+  const batches: AnniversaryEntry[][] = []
+  const sched = new Scheduler({
+    store,
+    isIdle: () => false,
+    now: () => clock,
+    notify: (batch) => batches.push(batch.anniversaries)
+  })
+
+  sched.tick()
+  check('纪念日走的是同一个 tick', batches.length, 1)
+  check('它落在自己那一格，不挤进任务的 fresh', batches[0].map((e) => e.anniversary.id).join(','), 'ann1')
+  check('晚一小时开机照样弹（它不是「错过」）', batches[0][0]?.at, at(2026, 9, 29, 9, 0))
+
+  sched.markAnniversaryFired(batches[0])
+  check('回填的是「那一天」，不是「那一刻」', store.anniversaries[0]!.firedFor, at(2026, 9, 29, 0, 0))
+
+  clock = at(2026, 9, 29, 20, 0)
+  store.patchSettings({ allDayRemindTime: '19:00' })
+  sched.tick()
+  check('同一天改了提醒时刻也不重弹（按天论）', batches.length, 1)
+
+  clock = at(2026, 9, 30, 10, 0)
+  sched.tick()
+  check('一次性纪念日第二天不再响', batches.length, 1)
+
+  rmSync(dir, { recursive: true, force: true })
+}
+
+console.log('\n--- 纪念日的通知文案 ---')
+{
+  const now = at(2026, 9, 29, 10, 0)
+  const annBody = (a: Anniversary): string => describeAnniversary(a, anniversaryOccurrence(a, now)!).body
+
+  check(
+    '标题就是那条纪念日的名字',
+    describeAnniversary(anniversary(), anniversaryOccurrence(anniversary(), now)!).title,
+    '结婚纪念日'
+  )
+  check('「就是今天」+ 第几周年', annBody(anniversary({ date: '2015-09-29' })), '就是今天 · 第 11 周年')
+  // 一次性既没有周年数也没有农历标注，只说「就是今天」
+  check('一次性只说「就是今天」', annBody(anniversary({ date: '2026-09-29', yearly: false })), '就是今天')
+  check('农历纪念日把农历一并写出来', annBody(anniversary({ date: '2026-09-29', lunar: true })), '就是今天 · 今年 · 农历八月十九')
+}
+
 console.log('\n--- 倒计时取数 ---')
 {
   const now = at(2026, 9, 29, 10, 0)
@@ -2330,15 +2516,39 @@ console.log('\n--- store：纪念日的校验与读写 ---')
   check('空标题能过存储校验', normalizeAnniversary({ ...raw, title: '' }) !== null, true)
   check('不是对象，拦下', normalizeAnniversary('nope'), null)
 
+  // notify / firedFor 是 v4 才有的字段，老文件里根本没有 —— 缺了**补默认值**
+  // 而不是拦下：升级一次就让攒了几年的纪念日全部消失，是这里最贵的一种错误。
+  // notify 补的是 false：补 true 的话，所有老纪念日会在升级后的第一个早上集体开炮
+  check('缺 notify → 补 false', normalizeAnniversary({ ...raw, notify: undefined })?.notify, false)
+  check('notify 给了个大白话 → 按 false 算', normalizeAnniversary({ ...raw, notify: 'yes' })?.notify, false)
+  check('notify 是 true → 原样留下', normalizeAnniversary({ ...raw, notify: true })?.notify, true)
+  check('缺 firedFor → 补 null', normalizeAnniversary({ ...raw, firedFor: undefined })?.firedFor, null)
+  check('firedFor 是垃圾值 → 按没弹过算', normalizeAnniversary({ ...raw, firedFor: 'x' })?.firedFor, null)
+  check('firedFor 是数字 → 原样留下', normalizeAnniversary({ ...raw, firedFor: 123 })?.firedFor, 123)
+
   const s = new Store(file)
   s.addAnniversary(anniversary({ id: 'a1' }))
   const s2 = new Store(file)
   check('落盘读回', s2.anniversaries.length, 1)
   check('标题读回', s2.anniversaries[0]!.title, '结婚纪念日')
   check('农历开关读回', s2.anniversaries[0]!.lunar, false)
-  s2.updateAnniversary('a1', { title: '改成生日', lunar: true })
+  check('提醒开关读回（默认 false）', s2.anniversaries[0]!.notify, false)
+  check('firedFor 读回（默认 null）', s2.anniversaries[0]!.firedFor, null)
+
+  // 一批回填只写一次盘 —— `Scheduler.markAnniversaryFired` 就是这个形状
+  const firedDay = at(2026, 9, 29, 0, 0)
+  s2.updateAnniversaries([{ id: 'a1', patch: { firedFor: firedDay } }])
+  check('批量回填 firedFor', new Store(file).anniversaries[0]!.firedFor, firedDay)
+  check(
+    '批量里找不到的 id 静默跳过',
+    s2.updateAnniversaries([{ id: 'nope', patch: { notify: true } }]).length,
+    0
+  )
+
+  s2.updateAnniversary('a1', { title: '改成生日', lunar: true, notify: true })
   check('编辑写回', new Store(file).anniversaries[0]!.title, '改成生日')
   check('编辑不动的字段保留', new Store(file).anniversaries[0]!.date, '2015-05-20')
+  check('提醒开关改得动', new Store(file).anniversaries[0]!.notify, true)
   check('编辑不存在的返回 null', s2.updateAnniversary('nope', { title: 'x' }), null)
   check('删除成功', s2.removeAnniversary('a1'), true)
   check('删完就没了', new Store(file).anniversaries.length, 0)
@@ -2384,17 +2594,32 @@ console.log('\n--- commands.ts：纪念日的增删改 ---')
   const store = new Store(join(dir, 'a.json'))
   const now = at(2026, 9, 29, 10, 0)
   const run = (cmd: Command) => applyCommand(store, cmd, now)
-  const draft = { title: '  结婚纪念日 ', date: '2015-05-20', yearly: true, lunar: false }
+  const draft = {
+    title: '  结婚纪念日 ', date: '2015-05-20', yearly: true, lunar: false, notify: false
+  }
 
   const added = run({ type: 'anniversary:add', draft })
   check('add 成功', added.ok, true)
   check('标题去掉首尾空格', store.anniversaries[0]!.title, '结婚纪念日')
   const id = store.anniversaries[0]!.id
   check('id 是新生成的', typeof id === 'string' && id.length > 0, true)
+  check('新记的一条没弹过', store.anniversaries[0]!.firedFor, null)
 
   check('edit 成功', run({ type: 'anniversary:edit', id, draft: { ...draft, date: '2016-06-01' } }).ok, true)
   check('日期改掉了', store.anniversaries[0]!.date, '2016-06-01')
   check('createdAt 不被编辑改掉', store.anniversaries[0]!.createdAt, now)
+
+  // 「到那天提醒我」改得动
+  run({ type: 'anniversary:edit', id, draft: { ...draft, notify: true } })
+  check('edit 把 notify 写进去', store.anniversaries[0]!.notify, true)
+
+  // 但编辑**不该**动提醒账：改个名字就让今天已经弹过的那条重弹，
+  // 是最容易被当成「应用有 bug」的那种行为
+  const firedDay = at(2026, 9, 29, 0, 0)
+  store.updateAnniversary(id, { firedFor: firedDay })
+  run({ type: 'anniversary:edit', id, draft: { ...draft, title: '改个名字' } })
+  check('编辑改名字不动 firedFor', store.anniversaries[0]!.firedFor, firedDay)
+  check('名字确实改了', store.anniversaries[0]!.title, '改个名字')
 
   check('坏日期被拒', run({ type: 'anniversary:add', draft: { ...draft, date: '2026-02-31' } }).ok, false)
   check('空名字被拒', run({ type: 'anniversary:add', draft: { ...draft, title: '   ' } }).ok, false)
@@ -2403,7 +2628,7 @@ console.log('\n--- commands.ts：纪念日的增删改 ---')
   check('被拒不写进 store', store.anniversaries.length, 1)
 
   // 一次性纪念日不带农历开关（buildAnniversary 里归一）
-  run({ type: 'anniversary:add', draft: { title: '高考', date: '2027-06-07', yearly: false, lunar: true } })
+  run({ type: 'anniversary:add', draft: { title: '高考', date: '2027-06-07', yearly: false, lunar: true, notify: false } })
   check('只数一次的日子不吃农历开关', store.anniversaries[1]!.lunar, false)
 
   check('编辑不存在的给业务性失败', run({ type: 'anniversary:edit', id: 'nope', draft }).ok, false)
@@ -2604,10 +2829,11 @@ console.log('\n--- renderer/tokens.css 的对比度与用色规矩 ---')
 
   // --ink-faint 只准给图标字形用。逐个列出允许的落点：加一处就得在这里加一行，
   // 于是「顺手拿它给一段文案调淡」会在测试里被挡住
-  // （顺序 = styles.css 里的出现顺序，标题带那三个字形画在最前面）
+  // （顺序 = styles.css 里的出现顺序，标题带那三个字形画在最前面。
+  //   原表里还有 `.head__sep` —— 表头那句「· 还剩 4 件」换成读数带之后，
+  //   分隔线由 border-left 画，那枚 `·` 连同它的落点一起撤了）
   const GLYPH_SELECTORS = [
     '.titlebar__button',
-    '.head__sep',
     '.row__more',
     '.noticebar__close',
     '.datefield__caret'

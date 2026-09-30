@@ -195,23 +195,29 @@ const snapshot = {
   tasks: todayTasks,
 
   // ---- 倒计时这本书的素材 ----
-  // 纪念日不是任务（没有 completedAt / firedFor），走自己的数组。
+  // 纪念日不是任务（没有 completedAt / deletedAt / kind），走自己的数组。
   // `ann-far` 是刻意留在 365 天外的：用来验「还有 N 条更远的没显示」那一行。
+  // `notify` 全给 false：倒计时页上它没有任何视觉痕迹（开关只在表单里），
+  // 所以拿它当夹具变量没有意义，而 true 会让「默认不提醒」这条读起来可疑。
   anniversaries: [
     {
       id: 'ann-mom', title: '妈妈生日', date: '1968-03-12', yearly: true, lunar: false,
+      notify: false, firedFor: null,
       createdAt: now - 10 * 86_400_000, updatedAt: now
     },
     {
       id: 'ann-lunar', title: '外婆生日', date: '1990-09-24', yearly: true, lunar: true,
+      notify: false, firedFor: null,
       createdAt: now - 9 * 86_400_000, updatedAt: now
     },
     {
       id: 'ann-once', title: '术后复查', date: dayKeyOf(startOfToday + 20 * 86_400_000),
-      yearly: false, lunar: false, createdAt: now - 8 * 86_400_000, updatedAt: now
+      yearly: false, lunar: false, notify: false, firedFor: null,
+      createdAt: now - 8 * 86_400_000, updatedAt: now
     },
     {
       id: 'ann-far', title: '毕业二十年', date: '2030-06-30', yearly: false, lunar: false,
+      notify: false, firedFor: null,
       createdAt: now - 7 * 86_400_000, updatedAt: now
     }
   ],
@@ -323,7 +329,7 @@ async function mainWindowPass() {
     counts: [...document.querySelectorAll('.section__count')].map(e => e.textContent),
     day: (document.querySelector('.dateline__day') || {}).textContent,
     month: (document.querySelector('.dateline__month') || {}).textContent,
-    late: (document.querySelector('.head__late') || {}).textContent || null,
+    late: (document.querySelector('.head__late .readout__value') || {}).textContent || null,
     ticks: [...document.querySelectorAll('.row__tick')].map(e => e.dataset.urgency),
     tickW: [...document.querySelectorAll('.row__tick')].map(e => getComputedStyle(e, '::after').width),
     tickLeft: [...document.querySelectorAll('.row__tick')].map(e => Math.round(e.getBoundingClientRect().left)),
@@ -376,7 +382,7 @@ async function mainWindowPass() {
   ok('三个按钮：最小化 / 最大化 / 关闭', band.labels.join('/') === '最小化/最大化/关闭', band.labels)
   ok('整条是拖动区，按钮从中挖了 no-drag 出来', band.region === 'drag' && band.btnRegion === 'no-drag', band)
   ok('按钮 42 宽（原生 caption 的 46 在 420 窄窗里挤掉了标题）', band.btnWidth === 42, band)
-  ok('字形用第三级灰 --ink-faint', band.glyph === 'rgb(139, 149, 153)', band.glyph)
+  ok('字形用第三级灰 --ink-faint', band.glyph === 'rgb(135, 146, 154)', band.glyph)
 
   sentWindowActions = []
   for (const i of [0, 1, 2]) {
@@ -433,11 +439,13 @@ async function mainWindowPass() {
   ok('顶栏是大号日期', board.day === String(today.getDate()) && /月$/.test(board.month || ''), {
     day: board.day, month: board.month
   })
-  ok('状态行报逾期数', board.late === '逾期 1', board.late)
+  // 表头那句「20:53 · 还剩 4 件 逾期 3」换成了读数带：三格铭牌标签 + 等宽读数
+  ok('读数带报逾期数', board.late === '1', board.late)
 
-  // 刻度尺：长度编码紧迫度（7 / 13 / 21px），这里只有一件逾期、没有「快到了」
+  // 量尺：刻度长度编码紧迫度（7 / 13 / 24px），这里只有一件逾期、没有「快到了」。
+  // 逾期那根还要**越过轴向左伸出 7px**，所以它在时刻列里也占一格
   ok('刻度按紧迫度分档', board.ticks.join('/') === 'overdue/none/none/none', board.ticks)
-  ok('刻度长度跟着档位变', board.tickW[0] === '21px' && board.tickW[1] === '7px', board.tickW)
+  ok('刻度长度跟着档位变', board.tickW[0] === '24px' && board.tickW[1] === '7px', board.tickW)
   // 竖轴要是一根**通到底**的线：每一行的刻度列必须在同一个 x 上。
   // 「今天随时」那一段的行没有时刻，靠的是时刻列恒定占位撑住 —— 这条就是它的守卫
   ok('竖轴逐行对齐（含无时刻的段）', new Set(board.tickLeft).size === 1, board.tickLeft)
@@ -483,7 +491,7 @@ async function mainWindowPass() {
     label: document.querySelectorAll('.head__actions .iconbutton')[2].getAttribute('aria-label')
   }))()`)
   ok('themeSource=dark 时渲染层的 prefers-color-scheme 跟着变', dark.matched === true, dark)
-  ok('深色下底纸用的是深色 token', dark.paper === 'rgb(15, 19, 21)', dark.paper)
+  ok('深色下底纸用的是深色 token', dark.paper === 'rgb(12, 16, 18)', dark.paper)
   ok('开关的文案也跟着翻面', dark.label === '切到浅色', dark.label)
 
   nativeTheme.themeSource = 'light'
@@ -492,8 +500,8 @@ async function mainWindowPass() {
     paper: getComputedStyle(document.body).backgroundColor,
     ink: getComputedStyle(document.body).color
   }))()`)
-  ok('浅色下底纸用的是浅色 token', light.paper === 'rgb(227, 231, 229)', light.paper)
-  ok('浅色的字是深色（不是白字压白底）', light.ink === 'rgb(23, 33, 42)', light.ink)
+  ok('浅色下底纸用的是浅色 token', light.paper === 'rgb(228, 231, 233)', light.paper)
+  ok('浅色的字是深色（不是白字压白底）', light.ink === 'rgb(18, 24, 28)', light.ink)
   nativeTheme.themeSource = 'system'
 
   // 托盘菜单那条 main → renderer 的切视图链路
@@ -838,8 +846,9 @@ async function mainWindowPass() {
   ok('每年都数的写着「已 N 天」', /已 \d+ 天/.test(cd.annSubs[1] || ''), cd.annSubs[1])
   ok('更远的那条被藏起来并说明了几句',
     cd.notes.some((n) => /还有 1 条更远的没显示/.test(n || '')), cd.notes)
-  ok('底部写明数据来源与「不弹通知」',
-    cd.notes.some((n) => /国务院办公厅/.test(n || '') && /不弹通知/.test(n || '')), cd.notes)
+  ok('底部写明数据来源，以及提醒得自己勾',
+    cd.notes.some((n) => /国务院办公厅/.test(n || '')
+      && /默认只倒数/.test(n || '') && /到那天提醒我/.test(n || '')), cd.notes)
 
   // 加一个纪念日：名字空着不放行、日期旁边当场显示农历
   await evalIn(win, `(document.querySelector('.topbar__actions .iconbutton').click(), 'ok')`)
@@ -850,16 +859,39 @@ async function mainWindowPass() {
     lunarInline: (document.querySelector('.annform .unit') || {}).textContent || null,
     dateField: document.querySelectorAll('.annform .datefield').length,
     nativeDate: document.querySelectorAll('.annform input[type=date]').length,
-    checks: document.querySelectorAll('.annform .check').length
+    checks: document.querySelectorAll('.annform .check').length,
+    notifyChecked: (() => {
+      const box = [...document.querySelectorAll('.annform .check')]
+        .filter(e => /提醒我/.test(e.textContent || ''))[0]
+      return box ? box.querySelector('input').checked : null
+    })(),
+    hints: [...document.querySelectorAll('.annform .field__hint')].map(e => e.textContent).join(' | ')
   }))()`)
   ok('点「+」长出加纪念日的表单', annForm.open === true, annForm)
   // 默认勾着「每年都数」，所以「按哪个历」也跟着长出来 —— 它不是多余的一格，
   // 是「农历生日」唯一的入口（见 CountdownView 顶部）
-  ok('表单有名字/日期/重复，默认每年都数所以还多一格「按哪个历」',
-    annForm.labels.join('/') === '名字/日期/重复/按哪个历', annForm.labels)
+  ok('表单有名字/日期/重复/提醒，默认每年都数所以还多一格「按哪个历」',
+    annForm.labels.join('/') === '名字/日期/重复/按哪个历/提醒', annForm.labels)
   ok('日期用的是自绘控件', annForm.dateField === 1 && annForm.nativeDate === 0, annForm)
   ok('日期旁边当场把农历写出来给他对', /^农历/.test(annForm.lunarInline || ''), annForm.lunarInline)
-  ok('默认勾着「每年都数」', annForm.checks === 2, annForm.checks)
+  // 「每年都数」+「按农历月日重复」+「到那天提醒我」= 三个 .check
+  ok('默认勾着「每年都数」，但「到那天提醒我」不勾',
+    annForm.checks === 3 && annForm.notifyChecked === false,
+    { checks: annForm.checks, notify: annForm.notifyChecked })
+  ok('没勾提醒时不多说一句', !/全天/.test(annForm.hints || ''), annForm.hints)
+
+  // 勾上「到那天提醒我」：当场说明会在几点弹 —— 时刻取自设置里那一格，
+  // 不在这里重填一遍（重填一遍就会出现两个各说各话的时刻）
+  await evalIn(win, `(() => {
+    const box = [...document.querySelectorAll('.annform .check')]
+      .filter(e => /提醒我/.test(e.textContent || ''))[0]
+    box.querySelector('input').click()
+    return 'ok'
+  })()`)
+  await sleep(200)
+  const annHints = await evalIn(win,
+    `[...document.querySelectorAll('.annform .field__hint')].map(e => e.textContent).join(' | ')`)
+  ok('勾上之后当场说明会在几点弹', /全天/.test(annHints || ''), annHints)
 
   await evalIn(win, `(document.querySelector('.annform .topbar__button').click(), 'ok')`)
   await sleep(200)
@@ -870,6 +902,30 @@ async function mainWindowPass() {
   await evalIn(win, `(document.querySelector('.annform .linkbutton').click(), 'ok')`)
   await sleep(200)
   ok('能收起表单', (await evalIn(win, `!!document.querySelector('.annform')`)) === false)
+
+  // 再开一次，填上名字、勾着提醒提交 —— 命令里得真的带上 notify。
+  // 只有那个勾是不够的：命令层不把它组装进记录，勾了也白搭
+  await evalIn(win, `(document.querySelector('.topbar__actions .iconbutton').click(), 'ok')`)
+  await sleep(250)
+  await evalIn(win, `(() => {
+    const i = document.querySelector('.annform .field input')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(i, '领证纪念日')
+    i.dispatchEvent(new Event('input', { bubbles: true }))
+    const box = [...document.querySelectorAll('.annform .check')]
+      .filter(e => /提醒我/.test(e.textContent || ''))[0]
+    box.querySelector('input').click()
+    return i.value
+  })()`)
+  await sleep(200)
+  sentCommands = []
+  await evalIn(win, `(document.querySelector('.annform .topbar__button').click(), 'ok')`)
+  await sleep(250)
+  const addCmd = sentCommands.find((c) => c.type === 'anniversary:add')
+  ok('提交时把「到那天提醒我」一起发出去',
+    addCmd !== undefined && addCmd.draft.notify === true, addCmd)
+  ok('提交成功后表单自己收起',
+    (await evalIn(win, `!!document.querySelector('.annform')`)) === false)
 
   // 点一条纪念日 → 编辑表单，删除是两步确认（纪念日没有软删，也没有撤销窗口）
   await evalIn(win, `(document.querySelector('.crow__hit').click(), 'ok')`)

@@ -1,3 +1,4 @@
+import { dueAnniversaries, type AnniversaryEntry } from '../shared/anniversary'
 import { TICK_MS } from '../shared/defaults'
 import { groupMissed } from '../shared/group'
 import { inQuietHours } from '../shared/quiet'
@@ -7,6 +8,12 @@ import type { Store } from './store'
 export interface NotifyBatch {
   fresh: DueEntry[]
   missed: DueEntry[]
+  /**
+   * 到点的纪念日。**不切 fresh/missed** —— 见 `dueAnniversaries`：
+   * 它说的是一整天，早上九点没弹成、十一点开机仍然该弹，
+   * 而且绝不该被揉进「有 N 件事错过了」那句话里（把生日说成「错过了」是错的）。
+   */
+  anniversaries: AnniversaryEntry[]
 }
 
 export interface SchedulerDeps {
@@ -80,6 +87,17 @@ export class Scheduler {
     this.store.updateTasks(entries.map((e) => ({ id: e.task.id, patch: { firedFor: e.at } })))
   }
 
+  /**
+   * 纪念日的回填。标的是 `e.day` 而**不是** `e.at` —— 它的幂等按天算
+   * （见 `Anniversary.firedFor`）：09:00 弹过之后，同一天把提醒时刻改成
+   * 11:00 也不该再弹一遍。这里如果跟着任务写 `e.at`，那条路径就会重弹。
+   */
+  markAnniversaryFired(entries: AnniversaryEntry[]): void {
+    this.store.updateAnniversaries(
+      entries.map((e) => ({ id: e.anniversary.id, patch: { firedFor: e.day } }))
+    )
+  }
+
   tick(): void {
     const now = this.clock()
 
@@ -98,11 +116,18 @@ export class Scheduler {
     if (inQuietHours(settings, now) || (settings.quietWhenIdle && this.isIdle())) return
 
     const due = dueNow(this.remindableTasks(), settings, now)
-    if (due.length === 0) return
+    const anniversaries = dueAnniversaries(this.store.anniversaries, settings, now)
+    if (due.length === 0 && anniversaries.length === 0) return
 
-    this.notify(groupMissed(due, now))
+    this.notify({ ...groupMissed(due, now), anniversaries })
   }
 
+  /**
+   * 会提醒的任务。纪念日**不在这里** —— 它压根不在 `store.tasks` 里，
+   * 而且它的提醒规则（按天论、每年滚动、没有「错过」）本来就与任务不同，
+   * 混进这个数组只会让 `dueNow` 里冒出三处 `kind === 'anniversary'` 的例外。
+   * 两条支路在 `tick` 里并到同一批通知上，那才是它们该合的地方。
+   */
   private remindableTasks() {
     return this.store.tasks.filter(isRemindable)
   }

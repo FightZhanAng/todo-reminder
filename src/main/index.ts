@@ -251,6 +251,8 @@ if (!app.requestSingleInstanceLock()) {
         tray.refresh()
         // 回填 firedFor：通知真弹出去之后才标，否则同批任务每 TICK_MS 重弹一次
         scheduler.markFired([...batch.fresh, ...batch.missed])
+        // 纪念日单独回填：它标的是「那一天」而不是「那一刻」（见 markAnniversaryFired）
+        scheduler.markAnniversaryFired(batch.anniversaries)
         broadcast(ctx)
       }
     })
@@ -277,6 +279,8 @@ if (!app.requestSingleInstanceLock()) {
       runCommand: (cmd) => void runCommand(ctx, cmd),
       // 点通知要落到**具体那一条**上：只把窗口唤起来，用户还得自己在列表里找
       onFocusTask: (taskId) => openMain(null, taskId),
+      // 纪念日没有可点的动作，点它直接到倒计时页 —— 那一屏就是它的全部上下文
+      onOpenCountdown: () => openMain('countdown', null),
       raiseNotice
     })
 

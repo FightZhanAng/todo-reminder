@@ -1,9 +1,12 @@
 import { Notification } from 'electron'
 import { ACTION_ORDER, actionLabel, type TaskAction } from '../shared/actions'
-import { missedTag, parseActivation, taskTag, type ActivationLike } from '../shared/activation'
+import {
+  anniversaryTag, missedTag, parseActivation, taskTag, type ActivationLike
+} from '../shared/activation'
+import type { AnniversaryEntry } from '../shared/anniversary'
 import type { Command } from '../shared/commands'
 import type { Notice } from '../shared/ipc'
-import { describeTask, missedSummary } from '../shared/notifyText'
+import { describeAnniversary, describeTask, missedSummary } from '../shared/notifyText'
 import { buildToastXml } from '../shared/toastXml'
 import type { RemindableTask } from '../shared/types'
 import type { NotifyBatch } from './scheduler'
@@ -29,6 +32,13 @@ export interface NotifierDeps {
   runCommand: (cmd: Command) => void
   /** 点通知正文 / 「打开待办」 → 唤起窗口并聚焦 */
   onFocusTask: (taskId: string) => void
+  /**
+   * 点纪念日那条通知 → 唤起窗口并切到倒计时页。
+   *
+   * 不复用 `onFocusTask`：那个参数是任务 id，而纪念日压根不在任务表里 ——
+   * 硬塞一个假 id 进去，只会把「找不到这条任务」变成一个静默的空操作。
+   */
+  onOpenCountdown: () => void
   /** 通知发不出去时的反馈渠道（只 console.error 的话，用户永远看不到） */
   raiseNotice: (notice: Notice) => void
 }
@@ -67,6 +77,10 @@ export class Notifier {
 
     const hit = parseActivation(raw)
     if (hit.kind === 'unknown') return
+    if (hit.kind === 'countdown') {
+      this.deps.onOpenCountdown()
+      return
+    }
     if (hit.kind === 'open') this.deps.onFocusTask(hit.taskId)
     else this.applyAction(hit.taskId, hit.action)
   }
@@ -75,6 +89,7 @@ export class Notifier {
     if (!Notification.isSupported()) return
 
     for (const entry of batch.fresh) this.showTask(entry.task, entry.at)
+    for (const entry of batch.anniversaries) this.showAnniversary(entry)
     if (batch.missed.length > 0) this.showMissed(batch)
   }
 
@@ -153,6 +168,47 @@ export class Notifier {
         id: 'notify-failed',
         level: 'warn',
         text: `聚合通知发送失败：${err}。检查「专注助手」或系统通知设置。`,
+        at: Date.now()
+      })
+    })
+    n.show()
+  }
+
+  /**
+   * 纪念日那条通知。
+   *
+   * 只有一颗按钮「打开倒计时」，**没有那三颗动作按钮** —— 纪念日没有可执行
+   * 的动作，摆一排按钮只会让人以为点「完成」能把生日过掉。
+   *
+   * 同样在 Windows 上自己生成 XML：那颗按钮的 `arguments` 里得带着 tag，
+   * 否则点下去回传空参数、认不出这是哪条通知（见类顶部那段说明）。
+   */
+  private showAnniversary(entry: AnniversaryEntry): void {
+    const { anniversary, at, occurrence } = entry
+    const { title, body } = describeAnniversary(anniversary, occurrence)
+    const tag = anniversaryTag(anniversary.id, at)
+    const silent = !this.deps.store.settings.soundEnabled
+    const n = new Notification({
+      id: tag,
+      ...(process.platform === 'win32'
+        ? { toastXml: buildToastXml({ tag, title, body, buttons: ['打开倒计时'], silent }) }
+        : {
+            title,
+            body,
+            silent,
+            actions: [{ type: 'button' as const, text: '打开倒计时' }]
+          })
+    })
+
+    if (process.platform !== 'win32') {
+      n.on('action', () => this.deps.onOpenCountdown())
+      n.on('click', () => this.deps.onOpenCountdown())
+    }
+    n.on('failed', (_e, err) => {
+      this.deps.raiseNotice({
+        id: 'notify-failed',
+        level: 'warn',
+        text: `纪念日通知发送失败：${err}。检查「专注助手」或系统通知设置。`,
         at: Date.now()
       })
     })
