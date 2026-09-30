@@ -16,7 +16,8 @@
  */
 const { app, BrowserWindow, ipcMain, nativeTheme } = require('electron')
 const { join } = require('node:path')
-const { mkdirSync, writeFileSync } = require('node:fs')
+const { mkdirSync, writeFileSync, readFileSync } = require('node:fs')
+const { pathToFileURL } = require('node:url')
 
 const ROOT = join(__dirname, '..')
 const REPORT_DIR = join(ROOT, '.tmp-smoke')
@@ -75,12 +76,27 @@ process.on('unhandledRejection', (err) => {
 })
 
 const HOUR = 3600_000
-const now = Date.now()
+const realNow = Date.now()
 const startOfToday = new Date(
-  new Date().getFullYear(),
-  new Date().getMonth(),
-  new Date().getDate()
+  new Date(realNow).getFullYear(),
+  new Date(realNow).getMonth(),
+  new Date(realNow).getDate()
 ).getTime()
+/**
+ * 虚拟时钟：把「现在」钉在今天 14:00，渲染层由 writePinnedEntries 注入同一偏移。
+ *
+ * 为什么：夹具与断言都假定「下午的会」（now + 2h）还留在今天 —— 看板才有
+ * 「接下来」那一段。夜里 22 点以后跑，now + 2h 跨过午夜，那条任务被应用
+ * **合法地**挪进「以后」（groupToday 只看今天），于是 12 条断言连锁假失败，
+ * 看起来像回归、其实应用没毛病。钉住之后任何时段跑结果都确定。
+ *
+ * 偏移是常量，时钟照常走（真实流逝 + 偏移）—— 气泡计时、退场动画这些
+ * 靠「过了多久」的逻辑不受影响；只挪墙钟、不改日历：虚拟时刻与真实时刻
+ * 同一天，所以渲染层那些只取日期/星期的 new Date() 依旧一致。
+ */
+const VIRTUAL_NOW = startOfToday + 14 * HOUR
+const CLOCK_OFFSET_MS = VIRTUAL_NOW - realNow
+const now = VIRTUAL_NOW
 const pad2 = (n) => String(n).padStart(2, '0')
 const dayKeyOf = (ts) => {
   const d = new Date(ts)
@@ -281,6 +297,61 @@ async function evalIn(win, code) {
 }
 
 /**
+ * 注入时钟补丁后的渲染层入口副本（见 VIRTUAL_NOW 的注释）。
+ * 资产引用从相对地址改写成指向原 out/renderer/ 的绝对地址，
+ * 所以副本虽然躺在 .tmp-smoke/pinned/ 下，加载的还是同一份产物。
+ */
+const PINNED_DIR = join(REPORT_DIR, 'pinned')
+const PINNED_INDEX = join(PINNED_DIR, 'index.html')
+const PINNED_QUICKADD = join(PINNED_DIR, 'quickadd.html')
+
+/**
+ * 生成上面那两个副本。补丁必须在页面里**任何应用代码之前**执行 ——
+ * 看板的「今天」在首帧就用 Date.now() 定了分组，加载完再
+ * executeJavaScript 补一刀永远晚一帧；useNow 的分钟档定时器最长还要
+ * 等 60 秒才取新值。塞进 `<head>` 的内联脚本在解析期就跑，先于所有
+ * module 脚本，钉得住第一帧。
+ *
+ * 换这条路的代价试出来两条：
+ * - CDP（webContents.debugger 的 Page.addScriptToEvaluateOnNewDocument
+ *   也能「新文档前执行」）：这台机器的 Electron 43 上 sendCommand 一律
+ *   吊死（Page.enable 8 秒不回），整条路走不通；
+ * - protocol.handle('file') 拦截注入：进程直接崩（crashpad not connected）。
+ *   内置 file scheme 在这版上不能动。
+ *
+ * 也别真改 out/ 里的产物 —— 那是构建输出，改了会污染下一次构建的差异；
+ * 副本放 .tmp-smoke 下，冒烟结束留在那里也无妨（目录本身就是临时产物）。
+ */
+function writePinnedEntries() {
+  const pin = `<script>(() => { const real = Date.now; const offset = ${CLOCK_OFFSET_MS}; Date.now = () => real() + offset; })()</script>`
+  const base = pathToFileURL(join(ROOT, 'out/renderer')).href
+  const pairs = [
+    [join(ROOT, 'out/renderer/index.html'), PINNED_INDEX],
+    [join(ROOT, 'out/renderer/quickadd.html'), PINNED_QUICKADD]
+  ]
+  mkdirSync(PINNED_DIR, { recursive: true })
+  for (const [src, dest] of pairs) {
+    let html = readFileSync(src, 'utf8')
+    // 两处都别让替换静默落空 —— 落空的副本要么没打补丁、要么加载不到
+    // js/css，届时 200 多条断言会以「找不到元素」的假象收场，正好是
+    // 虚拟时钟想消灭的那类误导性失败。构建产物结构变了就当场喊出来。
+    if (!html.includes('<head>')) {
+      throw new Error(`${src} 里找不到 <head>，时钟补丁没地方塞（构建产物结构变了？）`)
+    }
+    let rewritten = 0
+    html = html.replace(/(src|href)="\.\/assets\//g, (_m, attr) => {
+      rewritten += 1
+      return `${attr}="${base}/assets/`
+    })
+    if (rewritten === 0) {
+      throw new Error(`${src} 里没有相对资产引用可改写，副本会加载不到 js/css（构建产物结构变了？）`)
+    }
+    html = html.replace('<head>', '<head>' + pin)
+    writeFileSync(dest, html, 'utf8')
+  }
+}
+
+/**
  * 开一个离屏窗口。`winOpts` 是**窗口级**选项（width / height / frame…），
  * `additionalArguments` 单独掏出来放进 webPreferences。
  *
@@ -315,7 +386,7 @@ async function mainWindowPass() {
   win.webContents.on('did-fail-load', (_e, code, desc) => problems.push(`加载失败 ${code} ${desc}`))
   win.webContents.on('render-process-gone', (_e, d) => problems.push(`渲染进程没了 ${JSON.stringify(d)}`))
 
-  await win.loadFile(join(ROOT, 'out/renderer/index.html'))
+  await win.loadFile(PINNED_INDEX)
   mainWin = win
   win.webContents.send('todo:snapshot', snapshot)
   await evalIn(win, `(window.addEventListener('error', (e) => {
@@ -1334,7 +1405,7 @@ async function quickAddPass() {
   const win = newWindow({ width: 440, height: 110, frame: false, additionalArguments: ['--todo-window=quickadd'] })
   win.webContents.on('preload-error', (_e, p, err) => problems.push(`quickadd preload 出错 ${p}: ${err.message}`))
 
-  await win.loadFile(join(ROOT, 'out/renderer/quickadd.html'))
+  await win.loadFile(PINNED_QUICKADD)
   await sleep(400)
   const qa = await evalIn(win, `(() => {
     const el = document.querySelector('.quickadd')
@@ -1385,6 +1456,7 @@ async function quickAddPass() {
 }
 
 app.whenReady().then(async () => {
+  writePinnedEntries()
   mark('ready')
   try {
     await mainWindowPass()

@@ -37,6 +37,13 @@
 
   `pnpm smoke` 必须在 **PowerShell** 里跑，且先 `Remove-Item Env:ELECTRON_RUN_AS_NODE`；
   结果落在 `.tmp-smoke/report.json`（electron.exe 是 GUI 子系统程序，stdout 接不到控制台）。
+  **冒烟跑在虚拟时钟上**（今天 14:00）：夹具假定「下午的会」（now + 2h）还留在今天，
+  夜里 22 点以后真跑会把那条任务合法地挪进「以后」，12 条断言连锁假失败。
+  `scripts/smoke.cjs` 会生成注入了时钟补丁的入口 HTML 副本（`.tmp-smoke/pinned/`），
+  改夹具时留意：夹具用的 `now` 是虚拟时刻，渲染层里只取日期/星期的 `new Date()` 是真实时刻
+  —— 两者同一天，别让某一边越过午夜。
+  两条已验证走不通的路，别再试：CDP（`webContents.debugger` 的 sendCommand 在这台
+  Electron 43 上吊死）、`protocol.handle('file')` 拦截注入（进程直接崩）。
   探针窗口的尺寸是照着 `main/index.ts` 抄的 420×640 **窗口**尺寸，别改成 Electron 的默认值 ——
   本应用是窄窗，布局问题恰恰都出在窄窗上。
   探针中途炸掉时 `report.json` 的 `problems` 里会有**渲染层那条栈**
