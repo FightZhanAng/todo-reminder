@@ -46,9 +46,17 @@ export const IPC = {
  * `open-repo-page` 是设置页「关于」那一格 —— 认领这个程序是从哪儿来的。
  * 两个开网页的动作分开而不是合成一个 `open-url`：**渲染层不该能指定
  * 要打开哪个网址**（那等于给了它一个任意 URL 的执行口），所以地址留在主进程。
+ *
+ * `minimize` / `toggle-maximize` / `close` 是自绘标题带那三个按钮。走 `e.sender`
+ * 找窗口而不是拿 `mainWindow`：渲染层只能命令**自己所在的那个**窗口
+ * （和 `hide` 同一条路）。`close` 就是原生 × 做的事 —— 关窗不等于退出，
+ * 托盘还活着（见 index.ts 的 `window-all-closed`）。
  */
 export type WindowAction =
   | 'hide'
+  | 'minimize'
+  | 'toggle-maximize'
+  | 'close'
   | 'open-data-dir'
   | 'open-download-page'
   | 'open-repo-page'
@@ -90,6 +98,14 @@ export interface RuntimeState {
    */
   update: UpdateState
   dataFile: string
+  /**
+   * 主窗口此刻是不是最大化。**也不落盘** —— 它跟 `update` 同理，是「这个进程
+   * 此刻的窗口状态」，写进数据文件下次启动必然是过期的。
+   *
+   * 自绘标题带需要它，因为那个 □ 按钮在最大化时要画成「还原」，而最大化可能
+   * 根本不是点按钮来的（双击标题带、Win+↑）。
+   */
+  windowMaximized: boolean
 }
 
 export interface Snapshot {

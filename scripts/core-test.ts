@@ -2604,7 +2604,14 @@ console.log('\n--- renderer/tokens.css 的对比度与用色规矩 ---')
 
   // --ink-faint 只准给图标字形用。逐个列出允许的落点：加一处就得在这里加一行，
   // 于是「顺手拿它给一段文案调淡」会在测试里被挡住
-  const GLYPH_SELECTORS = ['.head__sep', '.row__more', '.noticebar__close', '.datefield__caret']
+  // （顺序 = styles.css 里的出现顺序，标题带那三个字形画在最前面）
+  const GLYPH_SELECTORS = [
+    '.titlebar__button',
+    '.head__sep',
+    '.row__more',
+    '.noticebar__close',
+    '.datefield__caret'
+  ]
   const faintUsers: string[] = []
   let selector = ''
   for (const line of styles.split('\n')) {

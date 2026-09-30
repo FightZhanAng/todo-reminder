@@ -144,8 +144,10 @@ app.whenReady().then(async () => {
   // 主题在建窗口之前定好，理由见文件头
   nativeTheme.themeSource = theme
 
+  // 尺寸与框都要跟 main/index.ts 的主窗口对齐：那边是无框的（自绘标题带），
+  // 留着框拍出来的客户区窄一圈，标题带也就拍不准了
   const win = new BrowserWindow({
-    show: true, x: -3000, y: -3000, width: 420, height: 640,
+    show: true, x: -3000, y: -3000, width: 420, height: 640, frame: false,
     webPreferences: {
       preload: join(ROOT, 'out', 'preload', 'index.js'),
       sandbox: false,

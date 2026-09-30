@@ -103,7 +103,7 @@ ul {
   }
 }
 
-/* ---- 外壳：三段（顶栏 / 列表纸面 / 底栏） ---- */
+/* ---- 外壳：四段（标题带 / 顶栏 / 列表纸面 / 底栏） ---- */
 
 .app {
   display: flex;
@@ -122,6 +122,116 @@ ul {
   background: var(--sheet);
   scrollbar-width: thin;
   scrollbar-color: var(--rule-strong) transparent;
+}
+
+/* ---- 标题带：自绘，顶掉那条不跟主题走的原生标题栏 ----
+ *
+ * 横向几何：左内边距 12px 与 .head / .topbar 对齐；右边三个按钮各 42×32
+ * （合计 126px）—— 原生 caption 按钮是 46 宽，420px 的窄窗里照抄会把标题
+ * 文字挤没，再窄就点不准了。
+ *
+ * 它**不带下边线**：下面那条 .head / .topbar 自己有一道 rule，两条带子之间
+ * 再画一道就变成三条平行线。分隔靠的是这一段没有内容、只有控件。
+ */
+
+.titlebar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  height: 32px;
+  padding-left: 12px;
+  /* 整条是拖动区。里面的东西一律要 no-drag，否则鼠标根本到不了渲染层 */
+  -webkit-app-region: drag;
+  background: var(--paper);
+}
+
+.titlebar__name {
+  display: flex;
+  align-items: center;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
+
+.titlebar__actions {
+  display: flex;
+  align-items: stretch;
+}
+
+.titlebar__button {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  /* 图标字形，所以是第三级灰 —— 见 AGENTS.md 第 3 条（这条有测试钉着落点） */
+  color: var(--ink-faint);
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.titlebar__button:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+/* 三个字形全画在 currentColor 上，所以 hover 只换个字色就够了 */
+.titlebar__mark {
+  position: relative;
+  flex: none;
+}
+
+.titlebar__mark--min {
+  width: 10px;
+  height: 1px;
+  background: currentColor;
+}
+
+.titlebar__mark--max,
+.titlebar__mark--restore {
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+}
+
+/* 「还原」= 前方那个框 + 右上露出的一截后框。后框只画两条边：
+   画满一圈就会有一段压在前方框的线上，hover 底色一透出来是个补丁 */
+.titlebar__mark--restore::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border-top: 1px solid currentColor;
+  border-right: 1px solid currentColor;
+}
+
+.titlebar__mark--close {
+  width: 11px;
+  height: 11px;
+}
+
+.titlebar__mark--close::before,
+.titlebar__mark--close::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: -1px;
+  width: 13px;
+  height: 1px;
+  background: currentColor;
+}
+
+.titlebar__mark--close::before {
+  transform: rotate(45deg);
+}
+
+.titlebar__mark--close::after {
+  transform: rotate(-45deg);
 }
 
 /* ---- 顶栏：大号日期 + 一枚实心方钮 ---- */
@@ -245,6 +355,7 @@ body,
 .app,
 .app__body,
 .page__body,
+.titlebar,
 .head,
 .topbar,
 .bottombar {
@@ -1162,7 +1273,12 @@ body,
 .page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* 是「占满剩下的」，不是「占满视口」：.app 这一列里它上面还压着标题带
+     （以及提示条）。用 height: 100% 会整页往下多出那么多，而多出的那截被 body 的
+     overflow:hidden 切掉，且**滚不出来** —— 滚动容器自己是够高的，它不知道自己
+     的下半截在屏幕外。设置页最后那条「用浏览器打开」就是这么没的。 */
+  flex: 1;
+  min-height: 0;
 }
 
 .page__body {

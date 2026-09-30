@@ -23,6 +23,11 @@ export interface AppContext {
   /** 快捷键是否注册成功（由 quickadd.ts 维护） */
   hotkeyRegistered: () => boolean
   /**
+   * 主窗口此刻是否最大化。窗口还没建（藏在托盘里）时给 false ——
+   * 那种情况下没人会看到标题带，值用不上，但**不能抛**。
+   */
+  mainWindowMaximized: () => boolean
+  /**
    * 一条命令成功之后的副作用：tick + 托盘刷新 + 主题/开机自启/快捷键同步。
    * 实现在 index.ts（那里才拿得到 tray），通过依赖注入进来。
    * 它必须在 `store` 已经写完、`broadcast` 之前执行。
@@ -61,7 +66,8 @@ export function buildSnapshot(ctx: AppContext): Snapshot {
       notices: ctx.notices.list(),
       version: app.getVersion(),
       update: ctx.updater.getState(),
-      dataFile: ctx.store.dataFile
+      dataFile: ctx.store.dataFile,
+      windowMaximized: ctx.mainWindowMaximized()
     }
   }
 }
@@ -74,7 +80,9 @@ export function buildSnapshot(ctx: AppContext): Snapshot {
  *  - `pause` 处理器：暂停/恢复不落盘，不走 Command；
  *  - `setHotkey` 试注册失败分支：没写设置，但要刷新 `hotkeyRegistered` 状态；
  *  - 调度器 `notify` 回调：调度器不经命令层，弹通知后要刷新界面；
- *  - `index.ts` 里窗口首帧 `did-finish-load`：主动推一次，渲染层无需先 get()。
+ *  - `index.ts` 里窗口首帧 `did-finish-load`：主动推一次，渲染层无需先 get()；
+ *  - `index.ts` 里主窗口的 `maximize` / `unmaximize`：标题带那个 □ 要跟着翻成「还原」，
+ *    而最大化可能不是点按钮来的（双击标题带、Win+↑），所以只能由窗口事件推。
  *
  * 漏广播的症状是「操作生效了但界面不更新」，且只在特定路径出现。
  * 将来要加广播点时，请意识到这个清单、别只在 runCommand 里加。
@@ -135,6 +143,21 @@ export function registerIpc(ctx: AppContext): void {
     switch (action) {
       case 'hide':
         BrowserWindow.fromWebContents(e.sender)?.hide()
+        return
+      // 标题带那三个按钮。都从 e.sender 找窗口（渲染层只该命令自己那个窗），
+      // 而最大化后的界面变化靠 maximize/unmaximize 上的广播，不靠这里的返回值
+      case 'minimize':
+        BrowserWindow.fromWebContents(e.sender)?.minimize()
+        return
+      case 'toggle-maximize': {
+        const win = BrowserWindow.fromWebContents(e.sender)
+        if (!win) return
+        if (win.isMaximized()) win.unmaximize()
+        else win.maximize()
+        return
+      }
+      case 'close':
+        BrowserWindow.fromWebContents(e.sender)?.close()
         return
       case 'open-data-dir': {
         // 数据文件损坏时它恰恰不在原位（坏文件已被改名），而

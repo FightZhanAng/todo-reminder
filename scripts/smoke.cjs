@@ -226,6 +226,7 @@ const snapshot = {
   },
   runtime: {
     pausedUntil: null, hotkeyRegistered: true, corruptBackupPath: null,
+    windowMaximized: false,
     notices: [{ id: 'notify-failed', level: 'warn', text: '通知没发出去', at: now }],
     version: '0.1.0',
     // 更新状态由主进程推，这里就跟着在主进程侧改这一块再广播（见「更新」那一段）。
@@ -301,7 +302,9 @@ async function mainWindowPass() {
   // 尺寸必须和 main/index.ts 里建主窗口时一致。用 Electron 的默认 800×600 也能跑，
   // 但那量出来的换行、钳位、浮层收边全是另一套 —— 本应用是个 420 宽的窄窗，
   // 布局问题恰恰都出在窄窗上。
-  const win = newWindow({ width: 420, height: 640 })
+  // `frame: false` 同理：主窗口是自绘标题带（无框），那边 420×640 是整个**内容**
+  // 尺寸；这里留着框的话内容只有 420×601，量出来的底部留白全是假的。
+  const win = newWindow({ width: 420, height: 640, frame: false })
   win.webContents.on('preload-error', (_e, p, err) => problems.push(`preload 出错 ${p}: ${err.message}`))
   win.webContents.on('did-fail-load', (_e, code, desc) => problems.push(`加载失败 ${code} ${desc}`))
   win.webContents.on('render-process-gone', (_e, d) => problems.push(`渲染进程没了 ${JSON.stringify(d)}`))
@@ -340,6 +343,90 @@ async function mainWindowPass() {
   ok('底部收件箱入口带件数', /^收件箱 · 1 件$/.test(board.inboxLink || ''), board.inboxLink)
   ok('提示条显示出来', board.notice === '通知没发出去', board.notice)
   ok('样式表加载了', board.sheets > 0 && board.rowHeight > 20, { sheets: board.sheets, rowHeight: board.rowHeight })
+
+  // ---- 标题带 ----
+  // 主窗口是无框的，标题带就是唯一的拖动区与出口。它坏掉的两种样子都静默：
+  // 拖动区盖住按钮（三个按钮全成了摆设，界面上看不出任何异常），
+  // 或者忘了 no-drag（点得到，但窗口拖不动了）。
+  const band = await evalIn(win, `(() => {
+    const bar = document.querySelector('.titlebar')
+    const btns = [...document.querySelectorAll('.titlebar__button')]
+    const regionOf = (el) => {
+      const cs = getComputedStyle(el)
+      return cs.webkitAppRegion || cs.getPropertyValue('-webkit-app-region')
+    }
+    return {
+      name: (document.querySelector('.titlebar__name') || {}).textContent,
+      height: bar ? Math.round(bar.getBoundingClientRect().height) : 0,
+      right: bar ? Math.round(bar.getBoundingClientRect().right) : 0,
+      inner: window.innerWidth,
+      region: bar ? regionOf(bar) : null,
+      btnRegion: btns.length ? regionOf(btns[0]) : null,
+      labels: btns.map((b) => b.getAttribute('aria-label')),
+      btnWidth: btns.length ? Math.round(btns[0].getBoundingClientRect().width) : 0,
+      glyph: btns.length ? getComputedStyle(btns[0]).color : null
+    }
+  })()`)
+  // 「铺满」只能对着 innerWidth 断言：无框窗口的 420 是**窗口**宽，客户区还要再宽
+  // 一圈（Windows 那条不可见的 resize 边框，这台机器上实测内容 437）。
+  // 别把 437 钉成断言 —— 它随显示缩放变，换台机器就是另一个数。
+  ok('标题带 32px 高、铺满整个视口宽', band.height === 32 && band.right === band.inner, band)
+  ok('标题带写的是产品名（与 productName / AUMID 的 DisplayName 同一个字）',
+    band.name === '待办提醒', band)
+  ok('三个按钮：最小化 / 最大化 / 关闭', band.labels.join('/') === '最小化/最大化/关闭', band.labels)
+  ok('整条是拖动区，按钮从中挖了 no-drag 出来', band.region === 'drag' && band.btnRegion === 'no-drag', band)
+  ok('按钮 42 宽（原生 caption 的 46 在 420 窄窗里挤掉了标题）', band.btnWidth === 42, band)
+  ok('字形用第三级灰 --ink-faint', band.glyph === 'rgb(139, 149, 153)', band.glyph)
+
+  sentWindowActions = []
+  for (const i of [0, 1, 2]) {
+    await evalIn(win, `(document.querySelectorAll('.titlebar__button')[${i}].click(), 'ok')`)
+    await sleep(120)
+  }
+  ok('三个按钮各发对一条窗口动作',
+    sentWindowActions.join('/') === 'minimize/toggle-maximize/close', sentWindowActions)
+
+  // 那个 □ 在最大化时要画成「还原」。状态只能由主进程推（双击标题带、Win+↑
+  // 都不经过这个按钮），所以这条验的是 snapshot.runtime 那一整条通路
+  snapshot.runtime.windowMaximized = true
+  win.webContents.send('todo:snapshot', snapshot)
+  await sleep(200)
+  const maxed = await evalIn(win, `(() => {
+    const b = document.querySelectorAll('.titlebar__button')[1]
+    return { label: b.getAttribute('aria-label'), mark: b.querySelector('.titlebar__mark').className }
+  })()`)
+  ok('最大化时按钮的 aria-label 改成「向下还原」', maxed.label === '向下还原', maxed)
+  ok('字形也跟着换成那个带缺口的框', /--restore$/.test(maxed.mark || ''), maxed)
+  snapshot.runtime.windowMaximized = false
+  win.webContents.send('todo:snapshot', snapshot)
+  await sleep(200)
+
+  // ---- 「最后一屏永远差一截」这一类 ----
+  // 症状是页面底部那条怎么滚都滚不出来：滚动容器自己的下沿跑到视口外面去了，
+  // 而它内部的 scrollHeight 是够的 —— 拉到底也救不回来，因为容器不知道自己
+  // 的下半截在屏幕外。标题带把视口压掉 32px 之后，设置页最后那条「用浏览器打开」
+  // 就是这么消失的（那时 .page 写的还是 height:100%，量的是整个视口）。
+  const bottomFits = () =>
+    evalIn(win, `(() => {
+      const el = document.querySelector('.page__body') || document.querySelector('.app__body')
+      if (!el) return { missing: true }
+      el.scrollTop = el.scrollHeight
+      const last = el.lastElementChild
+      return {
+        inner: window.innerHeight,
+        containerOver: Math.round(el.getBoundingClientRect().bottom - window.innerHeight),
+        lastOver: last ? Math.round(last.getBoundingClientRect().bottom - window.innerHeight) : null
+      }
+    })()`)
+  for (const view of ['board', 'inbox', 'calendar', 'countdown', 'settings']) {
+    win.webContents.send('todo:open-view', view)
+    await sleep(260)
+    const fit = await bottomFits()
+    ok(`${view} 滚到底之后最后一屏在视口内`,
+      !fit.missing && fit.containerOver <= 0 && (fit.lastOver === null || fit.lastOver <= 0), fit)
+  }
+  win.webContents.send('todo:open-view', 'board')
+  await sleep(260)
 
   // 大号日期：今天的日 + 汉字月，逾期数在状态行里
   const today = new Date()

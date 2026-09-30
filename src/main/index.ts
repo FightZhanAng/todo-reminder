@@ -138,6 +138,10 @@ function showMainWindow(): void {
     minWidth: 340,
     minHeight: 480,
     show: false,
+    // 标题带是自绘的（见 renderer/components/TitleBar.tsx）。原生那条不跟着
+    // nativeTheme 走 —— 界面切到深色时它还是系统那套浅灰，两条带子拼在一起很割裂。
+    // 去掉框之后 420×640 就是内容尺寸，标题带占掉的高度正好是原来那条标题栏的。
+    frame: false,
     autoHideMenuBar: true,
     alwaysOnTop: store.settings.alwaysOnTop,
     // 不给的话开发态任务栏上是 Electron 的默认原子图标；打包后走 exe 内嵌图标
@@ -153,6 +157,10 @@ function showMainWindow(): void {
   })
   // 首帧由主进程主动推一次，渲染层不需要在挂载时先 get()
   mainWindow.webContents.on('did-finish-load', () => broadcast(ctx))
+  // 标题带那个 □ 要跟着翻成「还原」。走广播而不是让渲染层自己问：最大化可能
+  // 根本不是点按钮来的（双击标题带、Win+↑），渲染层没有别的途径知道
+  mainWindow.on('maximize', () => broadcast(ctx))
+  mainWindow.on('unmaximize', () => broadcast(ctx))
   mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
@@ -295,6 +303,7 @@ if (!app.requestSingleInstanceLock()) {
       notices,
       windows: () => [mainWindow].filter((w): w is BrowserWindow => w !== null),
       hotkeyRegistered: () => quickAdd.isHotkeyRegistered(),
+      mainWindowMaximized: () => mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isMaximized(),
       afterCommand: (cmd: Command, _result: CommandResult) => {
         // 原规格 §6.4：完成/推迟/推到明天/新建/编辑/删除/设置变更
         // 都要立刻重算一次并刷新托盘
