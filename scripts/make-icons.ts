@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { APP_ICON_SIZES, buildAppIco, appIconPng } from '../src/shared/appIcon'
+import { APP_ICON_SIZES, buildAppIco, buildAppIcns, ICNS_ENTRIES, appIconPng } from '../src/shared/appIcon'
 
 /**
- * 生成 `resources/icon.ico`（应用图标：窗口 / 任务栏 / exe 内嵌）。
+ * 生成 `resources/icon.ico`（应用图标：窗口 / 任务栏 / exe 内嵌）
+ * 与 `resources/icon.icns`（macOS 应用包图标，electron-builder.yml 的 build.mac.icon 指它）。
  *
- *     pnpm icons              # 只写 .ico
+ *     pnpm icons              # 只写 .ico / .icns
  *     pnpm icons --preview    # 顺手把各尺寸导成 PNG 到 .tmp-icons/，用来看效果
  *
  * **托盘图标不走这里** —— 它由 `shared/trayIcon.ts` 在运行时按任务栏明暗
@@ -13,11 +14,12 @@ import { APP_ICON_SIZES, buildAppIco, appIconPng } from '../src/shared/appIcon'
  *
  * 为什么要一个脚本而不是把图直接塞进仓库：图是**代码画出来的**，改一根线的
  * 坐标应该改代码、重新生成，而不是去修一张二进制图（改完没人知道它对应哪版）。
- * 生成的 .ico 提交进仓库，这样 CI / 打包机不需要先跑一遍 node。
+ * 生成的 .ico / .icns 提交进仓库，这样 CI / 打包机不需要先跑一遍 node。
  */
 
 const ROOT = projectRoot()
 const ICON_PATH = join(ROOT, 'resources', 'icon.ico')
+const ICNS_PATH = join(ROOT, 'resources', 'icon.icns')
 
 /**
  * 往上找到 package.json 所在的那一层当项目根。
@@ -43,6 +45,12 @@ function main(): void {
   mkdirSync(dirname(ICON_PATH), { recursive: true })
   writeFileSync(ICON_PATH, ico)
   console.log(`icon.ico  ${(ico.length / 1024).toFixed(1)} KB  ${APP_ICON_SIZES.join(' / ')}`)
+
+  const icns = buildAppIcns()
+  writeFileSync(ICNS_PATH, icns)
+  console.log(
+    `icon.icns  ${(icns.length / 1024).toFixed(1)} KB  ${ICNS_ENTRIES.map((e) => `${e.type}:${e.size}`).join(' / ')}`
+  )
 
   if (process.argv.includes('--preview')) {
     const dir = join(ROOT, '.tmp-icons')

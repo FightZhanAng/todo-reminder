@@ -41,6 +41,13 @@ const PROD_AUMID = 'com.tomcato.todo-reminder'
 // 也不符合约定的 %APPDATA%/todo-reminder/todo-reminder.json。
 app.setName(APP_NAME)
 
+// mac 上收掉 Dock 图标，与 Windows 的纯托盘形态对齐：这个应用「平时躲在
+// 托盘里」，而 mac 的 Dock 图标点上去没有默认行为（不挂 activate 就是
+// 一个点了没反应的死图标），还会常驻 Cmd+Tab。要开窗口走菜单栏的托盘
+// 图标 —— 和 Windows 用户点托盘是同一条路。必须趁 ready 之前调，晚了
+// Dock 图标会先闪一下。
+if (process.platform === 'darwin') app.dock?.hide()
+
 const AUMID = app.isPackaged ? PROD_AUMID : DEV_AUMID
 app.setAppUserModelId(AUMID)
 

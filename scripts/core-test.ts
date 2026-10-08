@@ -44,7 +44,7 @@ import {
   trayIconBitmap,
   trayIconPng
 } from '../src/shared/trayIcon'
-import { APP_ICON_SIZES, appIconBitmap, buildAppIco } from '../src/shared/appIcon'
+import { APP_ICON_SIZES, appIconBitmap, buildAppIco, buildAppIcns, encodeIcns, ICNS_ENTRIES } from '../src/shared/appIcon'
 import {
   CAL_HEADERS,
   CN_MONTHS,
@@ -82,7 +82,8 @@ import {
   isPortable,
   sameUpdateState,
   updateReducer,
-  updateSummary
+  updateSummary,
+  updateUnsupportedReason
 } from '../src/shared/update'
 
 function deadline(patch: Partial<DeadlineTask> = {}): DeadlineTask {
@@ -1022,6 +1023,46 @@ console.log('\n--- 应用图标：.ico 的容器格式与配色 ---')
   const off256 = offsets[count - 1]
   check('256 是 PNG', ico.subarray(off256, off256 + 8).toString('hex'), '89504e470d0a1a0a')
   check('256 的 PNG 边长写对', ico.readUInt32BE(off256 + 16), 256)
+}
+
+console.log('\n--- 应用图标：.icns 的容器格式（mac）---')
+{
+  // mac 侧的坑与 Windows 同构：容器是手编的，写错一个字段 Finder 会直接
+  // 拒收整个 icns，而 electron-builder 不做校验 —— 只能在这里拦。
+  const icns = buildAppIcns()
+  check('ICNS magic = "icns"', icns.subarray(0, 4).toString('ascii'), 'icns')
+  // 头部总长必须等于整个文件：写小了 Finder 拒收，写大了读取越界
+  check('头部总长 = 整个文件长度', icns.readUInt32BE(4), icns.length)
+
+  // 先按容器自身的长度域把条目偏移扫出来，再逐条断言 —— 断言集中、
+  // 没有提前退出的控制流，读到坏数据也只产生一条明确的失败
+  const chunks: Array<{ type: string; len: number; off: number }> = []
+  let cursor = 8
+  // 64 是防死循环的上限：真容器只有 4 条目；万一长度域损坏也不会在这里吊死
+  while (cursor < icns.length && chunks.length < 64) {
+    chunks.push({
+      type: icns.subarray(cursor, cursor + 4).toString('ascii'),
+      len: icns.readUInt32BE(cursor + 4),
+      off: cursor
+    })
+    cursor += icns.readUInt32BE(cursor + 4)
+  }
+  check('条目数 = ICNS_ENTRIES', chunks.length, ICNS_ENTRIES.length)
+  check('条目首尾相接，最后一项落在文件尾', cursor, icns.length)
+
+  chunks.forEach((chunk, i) => {
+    const { type, size } = ICNS_ENTRIES[i]
+    check(`@${chunk.off} 是 ${type}`, chunk.type, type)
+    // PNG 签名 8 + IHDR 长度域 4 + 'IHDR' 4 → 宽在第 16 字节起
+    const png = icns.subarray(chunk.off + 8, chunk.off + chunk.len)
+    check(`${type} 的载荷长 = 条目长 - 8`, png.length, chunk.len - 8)
+    check(`${type} 载荷是 PNG`, png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
+    check(`${type} 对应的 PNG 宽 = ${size}`, png.readUInt32BE(16), size)
+  })
+
+  // encodeIcns 对任意条目集都该成立：用一个假条目验「总长 = 8 + Σ(8+载荷)」
+  const tiny = encodeIcns([{ type: 'ic07', data: Buffer.alloc(4, 7) }])
+  check('手编容器的总长算式', tiny.readUInt32BE(4), 8 + 8 + 4)
 }
 
 console.log('\n--- urgency.ts ---')
@@ -2716,6 +2757,20 @@ console.log('\n--- 自动更新的状态机 ---')
   check('空字符串不算', isPortable({ PORTABLE_EXECUTABLE_DIR: '' }), false)
   check('没有这个变量就不是', isPortable({}), false)
   check('安装版的 env 里没有它', isPortable({ APPDATA: 'C:\\Users\\x\\AppData' }), false)
+
+  // 用不上的矩阵：平台 × 打包方式。mac 那条是给 CI 的 mac 包看的 ——
+  // 没 Developer ID 签名的包，Squirrel.Mac 在替换 .app 那一步会拒掉，
+  // 放着不管就是「查得到、下得动、装不上」的三段式失败
+  check('未打包 = 开发态', updateUnsupportedReason('win32', false, {}), 'dev')
+  check('mac 未打包也标开发态（判据是打包，不是平台）', updateUnsupportedReason('darwin', false, {}), 'dev')
+  check('mac 打包版一律标不支持（无签名）', updateUnsupportedReason('darwin', true, {}), 'mac-unsigned')
+  check('mac 便携判据不生效（env 里不会有那个变量）', updateUnsupportedReason('darwin', true, { PORTABLE_EXECUTABLE_DIR: '/tmp' }), 'mac-unsigned')
+  check('win 安装版能用', updateUnsupportedReason('win32', true, {}), null)
+  check('win 便携版不能用', updateUnsupportedReason('win32', true, { PORTABLE_EXECUTABLE_DIR: 'C:\\Temp' }), 'portable')
+  check('linux 打包版不设防（当前没有 linux target，标可用无副作用）', updateUnsupportedReason('linux', true, {}), null)
+
+  // 文案：unsupported 的每一档都要有一句人话，漏档的表现是界面空白
+  check('mac 未签名的文案', updateSummary(initialUpdateState('mac-unsigned')), 'macOS 版未签名，自动更新用不了，请手动下载新版本')
 
   // 状态去重：同一次失败会从 reject 和 error 事件两条路进来，只能广播一次
   const f1 = updateReducer(begin, { type: 'failed', message: 'x' }, t0)

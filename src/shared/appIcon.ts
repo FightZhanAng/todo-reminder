@@ -164,3 +164,44 @@ export function buildAppIco(sizes: number[] = APP_ICON_SIZES): Buffer {
     }))
   )
 }
+
+/**
+ * ICNS 条目类型 → 边长。
+ *
+ * macOS 只靠这几个类型码认尺寸：ic07/ic08/ic09 是 1x 的 128/256/512，
+ * ic10 是 1024（= 512pt @2x，Retina 屏的 Dock 与 Finder 大图标用）。
+ * 全部塞 PNG 载荷 —— ICNS 的老类型（ic04/ic05）要求 ARGB/JPEG2000，
+ * 而现代 macOS 对 PNG 载荷全认，没必要为 16/32 两档再画一份：
+ * 系统会拿附近的档自己缩。
+ *
+ * 头部与每个条目都是 4 字节类型码 + 4 字节大端长度 + 数据，
+ * 头部那个总长是**整个文件**的长度（含头），写小了 Finder 直接拒收。
+ */
+export const ICNS_ENTRIES: ReadonlyArray<{ type: string; size: number }> = [
+  { type: 'ic07', size: 128 },
+  { type: 'ic08', size: 256 },
+  { type: 'ic09', size: 512 },
+  { type: 'ic10', size: 1024 }
+]
+
+export function encodeIcns(entries: ReadonlyArray<{ type: string; data: Buffer }>): Buffer {
+  const chunks = entries.map((entry) => {
+    const head = Buffer.alloc(8)
+    head.write(entry.type, 0, 'ascii')
+    head.writeUInt32BE(8 + entry.data.length, 4)
+    return Buffer.concat([head, entry.data])
+  })
+
+  const header = Buffer.alloc(8)
+  header.write('icns', 0, 'ascii')
+  header.writeUInt32BE(8 + chunks.reduce((n, c) => n + c.length, 0), 4)
+
+  return Buffer.concat([header, ...chunks])
+}
+
+/** 生成完整的多尺寸 .icns（mac 应用包的图标，electron-builder.yml 的 build.mac.icon 指它） */
+export function buildAppIcns(): Buffer {
+  return encodeIcns(
+    ICNS_ENTRIES.map(({ type, size }) => ({ type, data: appIconPng(size) }))
+  )
+}

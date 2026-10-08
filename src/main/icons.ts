@@ -20,7 +20,12 @@ import { trayIconPng, type TrayIconKind } from '../shared/trayIcon'
  * 这里只包一层 `nativeImage`。像素断言在 `scripts/core-test.ts` 里。
  */
 function build(kind: TrayIconKind, color: string): NativeImage {
-  return nativeImage.createFromBuffer(trayIconPng(kind, color))
+  const img = nativeImage.createFromBuffer(trayIconPng(kind, color))
+  // macOS 菜单栏会随系统主题在深浅之间切，写死的单色线条必有一边看不见。
+  // template image 只取 alpha 通道、由系统自动反色 —— 这是 mac 托盘图标的
+  // 标准做法（颜色参数在 mac 上被忽略，Windows/Linux 仍按 color 画）。
+  if (process.platform === 'darwin') img.setTemplateImage(true)
+  return img
 }
 
 export function trayIconPending(color: string): NativeImage {

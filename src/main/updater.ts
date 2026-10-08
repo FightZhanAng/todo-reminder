@@ -24,16 +24,22 @@
  *
  * 见 `shared/update.ts` 的 `isPortable`：portable 版每次运行都解压到临时目录，
  * 没有可覆盖的安装位置，electron-updater 的 Windows 实现（NSIS）够不着它。
+ *
+ * ## macOS 一律不支持
+ *
+ * electron-updater 的 mac 实现（Squirrel.Mac）只认 zip，且要求应用带
+ * Developer ID 签名——没签名的包在替换 .app 那一步会被系统拒掉。
+ * 项目还没有开发者账号，mac 打包版一律标 `mac-unsigned`，界面提示手动下载，
+ * 别让「查得到、下得动、装不上」的三段式失败落到用户头上。
  */
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import {
   friendlyError,
   initialUpdateState,
-  isPortable,
   sameUpdateState,
   updateReducer,
-  type UnsupportedReason,
+  updateUnsupportedReason,
   type UpdateEvent,
   type UpdateState
 } from '../shared/update'
@@ -65,11 +71,9 @@ export interface UpdaterOptions {
   autoUpdateEnabled: () => boolean
 }
 
-/** 这一版进程能不能用自动更新。三种情况里两种是「不能」 */
-function unsupportedReason(): UnsupportedReason {
-  if (!app.isPackaged) return 'dev'
-  if (isPortable(process.env)) return 'portable'
-  return null
+/** 这一版进程能不能用自动更新。矩阵本身在 shared/update.ts（纯函数、有测试），这里只喂参数 */
+function unsupportedReason() {
+  return updateUnsupportedReason(process.platform, app.isPackaged, process.env)
 }
 
 export class Updater {

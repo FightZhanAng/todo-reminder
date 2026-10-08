@@ -37,7 +37,7 @@ export interface UpdateState {
   unsupported: UnsupportedReason
 }
 
-export type UnsupportedReason = 'portable' | 'dev' | null
+export type UnsupportedReason = 'portable' | 'dev' | 'mac-unsigned' | null
 
 export type UpdateStatus =
   /** 还没查过 */
@@ -162,6 +162,30 @@ export function isPortable(env: Record<string, string | undefined>): boolean {
 }
 
 /**
+ * 这一版进程用不用得了自动更新。null = 能用。
+ *
+ * 抽成纯函数是因为「在哪一天不能用」是个平台 × 打包方式的矩阵，
+ * 而 main/updater.ts 拿着它没法无头测试 —— 矩阵本身该是断言。
+ *
+ * macOS 这条要单独说：electron-updater 的 mac 实现（Squirrel.Mac）要求
+ * 应用**必须带 Developer ID 签名**才肯装更新 —— 没签名的包会在替换
+ * .app 那一步被系统拒掉。本项目还没有 Apple 开发者账号，CI 打出的
+ * mac 包一律是 ad-hoc 签名，所以 mac 上**一律标不支持**，让用户走
+ * 手动下载，而不是「查得到、下得动、装不上」。哪天真买了账号、
+ * CI 配上 `CSC_LINK`，把这条改成运行时检测签名再放行。
+ */
+export function updateUnsupportedReason(
+  platform: NodeJS.Platform,
+  isPackaged: boolean,
+  env: Record<string, string | undefined>
+): UnsupportedReason {
+  if (!isPackaged) return 'dev'
+  if (platform === 'darwin') return 'mac-unsigned'
+  if (isPortable(env)) return 'portable'
+  return null
+}
+
+/**
  * 把 electron-updater 抛出来的错误压成一句人话。
  *
  * 它的 `err.message` 经常是一整段带堆栈和 HTTP 细节的文本，直接显示在
@@ -192,6 +216,7 @@ export function friendlyError(err: unknown): string {
 export function updateSummary(state: UpdateState): string {
   if (state.unsupported === 'portable') return '便携版每次运行都在临时目录里，装不了新版本，请手动下载'
   if (state.unsupported === 'dev') return '开发运行时不检查更新'
+  if (state.unsupported === 'mac-unsigned') return 'macOS 版未签名，自动更新用不了，请手动下载新版本'
   switch (state.status) {
     case 'idle':
       return '还没检查过'

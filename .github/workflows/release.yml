@@ -1,6 +1,6 @@
 name: 出安装包
 
-# 打 tag（v*）就构建 Windows 安装包并发一条 Release；也可以手动触发只构建不发版。
+# 打 tag（v*）就构建 Windows + macOS 安装包并发一条 Release；也可以手动触发只构建不发版。
 # 界面冒烟（pnpm smoke）要真开 Electron 窗口，CI 上没有桌面会话，所以这里不跑。
 
 on:
@@ -60,7 +60,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           gh release view "$tag" >/dev/null 2>&1 ||
             gh release create "$tag" --title "$tag" \
-              --notes "Windows 安装包。setup 是 per-user NSIS 安装版，带自动更新；portable 双击即用但不能自动更新（它跑在临时解压目录里），新版本要自己下。"
+              --notes "Windows 安装包。setup 是 per-user NSIS 安装版，带自动更新；portable 双击即用但不能自动更新（它跑在临时解压目录里），新版本要自己下。macOS 包见下方的 dmg（未签名：首次打开要在系统设置里放行，自动更新不可用，新版本要自己下载 —— arm64 是 Apple Silicon，x64 是 Intel 机）。"
           # latest.yml 是自动更新的版本指针，必须和 exe 属于同一次构建 ——
           # 拿旧的 yml 配新的 exe，客户端会按错误的 sha512 校验失败。
           # 注意 tag 必须和 package.json 的 version 一致，否则客户端算了半天
@@ -68,6 +68,71 @@ jobs:
           gh release upload "$tag" \
             release/todo-reminder-*.exe \
             release/latest.yml \
+            release/*.blockmap \
+            --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+
+  # needs: windows 不是为了省资源 —— 是 Release 的创建权只在 windows 这边
+  # （两个 job 并发跑 `gh release view || create` 会撞出竞态），而且 windows
+  # 挂了就不该发半个版本出去。
+  mac:
+    needs: windows
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 验证
+        run: pnpm typecheck && pnpm test:core
+        shell: bash
+
+      - name: 打包
+        # 没有 Developer ID 证书：关掉证书自动发现，electron-builder 会做
+        # ad-hoc 签名（Apple Silicon 对可执行代码的硬要求，跳不掉），但
+        # ad-hoc 过不了 Gatekeeper —— 用户首次打开要手动放行。运行时的
+        # 自动更新也因此被标成不支持（见 shared/update.ts 的 mac-unsigned）。
+        run: pnpm dist:mac
+        env:
+          DIST_OFFICIAL_MIRROR: '1'
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-packages
+          # mac 的更新指针是 latest-mac.yml（不是 windows 那份 latest.yml）；
+          # zip 是自动更新的载体，dmg 是给人下载的，两样都要发
+          path: |
+            release/todo-reminder-*.dmg
+            release/todo-reminder-*.zip
+            release/latest-mac.yml
+            release/*.blockmap
+          if-no-files-found: error
+
+      - name: 补传 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        # Release 已由 windows job 建好（needs 保证顺序）；这里只上传。
+        # view||create 兜底是防 windows 那边改了流程只剩 upload 的那一天。
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" >/dev/null 2>&1 ||
+            gh release create "$tag" --title "$tag" --notes "macOS 包（未签名，自动更新不可用）"
+          gh release upload "$tag" \
+            release/todo-reminder-*.dmg \
+            release/todo-reminder-*.zip \
+            release/latest-mac.yml \
             release/*.blockmap \
             --clobber
         env:

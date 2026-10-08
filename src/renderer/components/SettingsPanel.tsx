@@ -428,11 +428,11 @@ export function SettingsPanel({ state }: { state: AppState }): JSX.Element {
  * if 链每加一个状态就会漏一个分支，而漏掉的表现是「那一格什么都没有」——
  * 不报错，只是不能用。
  *
- * 便携版走 `open-download-page`（它装不了自动更新，见 shared/update.ts），
+ * 便携版与 mac 未签名版走 `open-download-page`（都装不了自动更新，见 shared/update.ts），
  * 开发版什么都不给 —— 那里根本没有更新源可谈。
  */
 function updateActions(u: UpdateState): JSX.Element | null {
-  if (u.unsupported === 'portable') {
+  if (u.unsupported === 'portable' || u.unsupported === 'mac-unsigned') {
     return (
       <button
         type="button"
