@@ -73,10 +73,28 @@ export function CountdownView({ state }: { state: AppState }): JSX.Element {
 
         {snapshot.settings.countdownHolidays ? (
           hero === null ? (
-            <div className="cal__note">
-              {LATEST_KNOWN_YEAR + 1} 年的放假安排还没公布，这里只说到 {LATEST_KNOWN_YEAR} 年
-              —— 国务院一般每年 10 月底发通知，公布了升一次版本就有
-            </div>
+            list.hiddenHolidays > 0 ? (
+              // 「一段假期都没显示」有两种成因，必须分开说：最近的假期在
+              // 「只看 N 天」之外（数据有，只是没显示），或者这一年真的还没公布。
+              // 一律说成后者是假话 —— 用户会去等一份不存在的通知
+              <div className="cal__note">
+                {`最近的假期要 ${list.hiddenHolidayDays} 天后，被「只看 ${
+                  snapshot.settings.countdownHorizonDays
+                } 天以内」挡住了`}
+                <button
+                  type="button"
+                  className="linkbutton cal__note-link"
+                  onClick={() => state.go({ name: 'settings' })}
+                >
+                  去设置里放宽
+                </button>
+              </div>
+            ) : (
+              <div className="cal__note">
+                {LATEST_KNOWN_YEAR + 1} 年的放假安排还没公布，这里只说到 {LATEST_KNOWN_YEAR} 年
+                —— 国务院一般每年 10 月底发通知，公布了升一次版本就有
+              </div>
+            )
           ) : (
             <section className="hero">
               <div className="hero__label">

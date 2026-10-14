@@ -2479,6 +2479,21 @@ console.log('\n--- 倒计时取数 ---')
   const near = collectCountdowns(now, list, { ...base, countdownHorizonDays: 30 })
   check('只看 30 天：远的藏起来', near.anniversaries.map((x) => x.item.id).join(','), 'near,once-past')
   check('被藏了几条', near.hiddenAnniversaries, 1)
+  check('只看 30 天：假期还在范围里，不算被挡住', near.hiddenHolidays, 0)
+  check('没被挡住时那个天数是 null', near.hiddenHolidayDays, null)
+
+  // 2026-10-14 修复：假期被「只看 N 天」挡住 ≠ 这一年还没公布。
+  // 修复前视图层只拿得到过滤后的数组，于是「2026-01-05 + 只看 30 天」会显示
+  // 「2027 年的放假安排还没公布」—— 而 2026 年那六段假期都在表里，最近的
+  // （春节）就在 41 天后。这是界面在说假话，用户会去等一份不存在的通知。
+  const jan5 = at(2026, 1, 5, 10, 0)
+  const narrow = collectCountdowns(jan5, [], { countdownHolidays: true, countdownHorizonDays: 30 })
+  const whole = collectCountdowns(jan5, [], { countdownHolidays: true, countdownHorizonDays: 0 })
+  check('只看 30 天：2026 年的假期一段都不在列表里', narrow.holidays.length, 0)
+  check('但它们是被挡住了，不是不存在', narrow.hiddenHolidays, whole.holidays.length)
+  check('挡住的那批里最近的是 41 天后的春节', narrow.hiddenHolidayDays, 41)
+  check('不限天数时没有被挡住的', whole.hiddenHolidays, 0)
+  check('不限天数时那个天数是 null', whole.hiddenHolidayDays, null)
 
   const noHoliday = collectCountdowns(now, list, { ...base, countdownHolidays: false })
   check('关掉节假日就真的一条都不给', noHoliday.holidays.length, 0)

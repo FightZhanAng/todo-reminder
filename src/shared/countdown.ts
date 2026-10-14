@@ -24,6 +24,16 @@ export interface CountdownAnniversary {
 
 export interface Countdowns {
   holidays: HolidayInfo[]
+  /**
+   * 有假期、但全被「只看 N 天以内」挡在界外的段数。
+   *
+   * 与 `holidays.length === 0` 是两件事，界面必须分开说：一个是「最近的
+   * 假期还在范围外」，一个是「这一年还没公布」。混成一句「{明年} 年的放假
+   * 安排还没公布」是**在说假话** —— 数据就在那儿，只是没显示。
+   */
+  hiddenHolidays: number
+  /** 被挡掉的那批里最近的一段还有多少天。没有就是 null */
+  hiddenHolidayDays: number | null
   anniversaries: CountdownAnniversary[]
   /** 被「只看 N 天以内」挡掉的纪念日条数，界面用它说一句「还有 N 条更远」 */
   hiddenAnniversaries: number
@@ -36,9 +46,11 @@ export function collectCountdowns(
 ): Countdowns {
   const horizon = settings.countdownHorizonDays > 0 ? settings.countdownHorizonDays : Infinity
 
-  const holidays = settings.countdownHolidays
-    ? upcomingHolidays(now, 20).filter((h) => h.daysUntil <= horizon)
-    : []
+  // 先取全量再分两堆：只留过滤结果的话，视图层就没法分辨「空」的成因，
+  // 只能猜 —— 而那正是它猜错的地方（把「挡住」说成「还没公布」）
+  const allHolidays = settings.countdownHolidays ? upcomingHolidays(now, 20) : []
+  const holidays = allHolidays.filter((h) => h.daysUntil <= horizon)
+  const beyondHorizon = allHolidays.filter((h) => h.daysUntil > horizon)
 
   const sorted = sortAnniversaries([...anniversaries], now)
   const kept: CountdownAnniversary[] = []
@@ -55,7 +67,14 @@ export function collectCountdowns(
     kept.push({ item, occurrence })
   }
 
-  return { holidays, anniversaries: kept, hiddenAnniversaries: hidden }
+  return {
+    holidays,
+    hiddenHolidays: beyondHorizon.length,
+    // 全量已按距离升序，所以被挡掉的第一段就是最近的那段
+    hiddenHolidayDays: beyondHorizon[0]?.daysUntil ?? null,
+    anniversaries: kept,
+    hiddenAnniversaries: hidden
+  }
 }
 
 /** 「10月1日—10月7日」/「10月1日」。跨月跨年都按真实日期写，不省略年份会太长 */
