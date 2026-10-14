@@ -1,5 +1,5 @@
 import { tsFromDayKey } from './calendar'
-import { lunarOf, solarFromLunar } from './lunar'
+import { lunarOf, solarFromLunar, type LunarDate } from './lunar'
 import { atTimeOfDay, dayIndex, dayKey, startOfDay } from './time'
 import type { Anniversary, Settings } from './types'
 
@@ -136,6 +136,31 @@ export function anniversaryInLeapMonth(a: Anniversary): boolean {
   const ts = tsFromDayKey(a.date)
   if (ts === null) return false
   return lunarOf(ts)?.isLeap === true
+}
+
+/**
+ * 表单里那句「怎么重复」的说明。
+ *
+ * **只看表单当前的值**（`yearly` / `lunar` 是用户此刻的勾选，`lunarOfDate`
+ * 是日期那一格算出来的农历），不传数据库里那条纪念日：传它的话，新建时
+ * 它是 null，「闰月」那句提示就永远不出现 —— 而那正是最需要它的时候
+ * （用户刚选完一个闰月里的日子）；反过来，取消勾选「按农历」之后那句提示
+ * 还会赖着不走，和正文自相矛盾。两种错法 2026-10-14 都修掉了。
+ *
+ * 闰月那句解释**只在锚点真的落在闰月里时**给：它讲的是「闰月怎么落到平年」，
+ * 对不在闰月里的日子是无意义的噪音（原来无差别拼上去，会拼出
+ * 「按正闰六月过」「按正正月过」这种话）。
+ */
+export function anniversaryRepeatHint(
+  yearly: boolean,
+  lunar: boolean,
+  lunarOfDate: LunarDate | null
+): string {
+  if (!yearly) return '只数这一天，过完就不再出现'
+  if (!lunar || lunarOfDate === null) return '每年到这一天倒数'
+  return lunarOfDate.isLeap
+    ? `每年到农历${lunarOfDate.label}那天倒数（这条记在闰月里，平年按同月同日过）`
+    : `每年到农历${lunarOfDate.label}那天倒数`
 }
 
 /**

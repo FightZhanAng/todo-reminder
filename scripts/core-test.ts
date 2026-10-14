@@ -2036,8 +2036,8 @@ import {
   holidayPositionOf, holidayYearKnown, isRestDay, makeupFor, nextHoliday, upcomingHolidays
 } from '../src/shared/holiday'
 import {
-  anniversaryInLeapMonth, anniversaryOccurrence, anniversaryRemindAt, daysLeftLabel,
-  dueAnniversaries, sortAnniversaries, yearsLabel, type AnniversaryEntry
+  anniversaryInLeapMonth, anniversaryOccurrence, anniversaryRemindAt, anniversaryRepeatHint,
+  daysLeftLabel, dueAnniversaries, sortAnniversaries, yearsLabel, type AnniversaryEntry
 } from '../src/shared/anniversary'
 import { collectCountdowns, fullDate, holidaySpanLabel, shortDate } from '../src/shared/countdown'
 import { agendaOfDay, monthAgenda, tasksOnDay } from '../src/shared/agenda'
@@ -2297,6 +2297,22 @@ console.log('\n--- 纪念日 ---')
   check('平年按同月同日过（不是闰月）', afterLeap.at, dayKey(solarFromLunar(2026, 6, 15)!))
   check('平年那次不是闰月', lunarOf(tsFromDayKey(afterLeap.at)!)!.isLeap, false)
   check('公历纪念日不算闰月', anniversaryInLeapMonth(anniversary()), false)
+
+  // 表单里那句「怎么重复」的说明（2026-10-14 修复）。它只看表单当前的值 ——
+  // 签名里没有那条纪念日，所以「新建时取不到 editing、提示永不出现」这个
+  // 形状从根上没有了；下面钉的是两种日期各该说什么
+  const leapLunar = lunarOf(tsFromDayKey(inLeap.date)!)
+  check('闰月里的农历日期：明说平年怎么过',
+    anniversaryRepeatHint(true, true, leapLunar),
+    '每年到农历闰六月十五那天倒数（这条记在闰月里，平年按同月同日过）')
+  check('不在闰月里的农历日期：不提闰月',
+    anniversaryRepeatHint(true, true, lunarOf(at(2026, 2, 17))),
+    '每年到农历正月初一那天倒数')
+  check('取消勾选「按农历」：立刻不说农历',
+    anniversaryRepeatHint(true, false, leapLunar), '每年到这一天倒数')
+  check('公历每年重复：不提农历', anniversaryRepeatHint(true, true, null), '每年到这一天倒数')
+  check('只数一次：不说重复也不说农历',
+    anniversaryRepeatHint(false, true, leapLunar), '只数这一天，过完就不再出现')
 
   // 一次性：过完就不再倒数，但那条记录还在，界面会说「已过 N 天」
   const once = anniversary({ date: '2026-12-25', yearly: false })

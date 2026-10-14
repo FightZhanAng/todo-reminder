@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react'
-import { anniversaryInLeapMonth, daysLeftLabel, yearsLabel } from '@shared/anniversary'
+import { anniversaryRepeatHint, daysLeftLabel, yearsLabel } from '@shared/anniversary'
 import { collectCountdowns, fullDate, holidaySpanLabel, shortDate } from '@shared/countdown'
 import { LATEST_KNOWN_YEAR } from '@shared/holiday'
 import { lunarOf } from '@shared/lunar'
@@ -253,8 +253,9 @@ function AnniversaryForm({
   const [problem, setProblem] = useState<string | null>(null)
 
   const ts = tsFromDayKey(date)
+  // 农历那句提示只看**表单当前的值**（见 anniversaryRepeatHint），
+  // 不看数据库里那条 `editing` —— 新建时它是 null，取它的话闰月提示永远不出现
   const lunarOfDate = ts === null ? null : lunarOf(ts)
-  const leapWarning = ts !== null && editing?.lunar === true && anniversaryInLeapMonth(editing)
 
   const submit = (): void => {
     if (title.trim() === '') {
@@ -342,14 +343,7 @@ function AnniversaryForm({
         </div>
       )}
 
-      <div className="field__hint">
-        {!yearly
-          ? '只数这一天，过完就不再出现'
-          : lunar && lunarOfDate !== null
-            ? `每年到农历${lunarOfDate.label}那天倒数。没有闰月的年份按正${lunarOfDate.monthName}过`
-            : '每年到这一天倒数'}
-        {leapWarning && '（这条记在闰月里，平年按同月同日过）'}
-      </div>
+      <div className="field__hint">{anniversaryRepeatHint(yearly, lunar, lunarOfDate)}</div>
 
       {/* 提醒排在「怎么重复」之后：前面几格都在回答「那天是哪天」，
           这一格是这条纪念日**唯一**会发生的外部动作 */}
