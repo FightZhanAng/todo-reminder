@@ -89,18 +89,32 @@ export class Store {
         )
       }
 
-      const incoming = Array.isArray(raw.tasks) ? raw.tasks : []
+      const tasksRaw = raw.tasks
+      const incoming = Array.isArray(tasksRaw) ? tasksRaw : []
       const tasks = incoming.map(normalizeTask).filter((t): t is Task => t !== null)
 
-      const incomingAnniversaries = Array.isArray(raw.anniversaries) ? raw.anniversaries : []
+      const anniversariesRaw = raw.anniversaries
+      const incomingAnniversaries = Array.isArray(anniversariesRaw) ? anniversariesRaw : []
       const anniversaries = incomingAnniversaries
         .map(normalizeAnniversary)
         .filter((a): a is Anniversary => a !== null)
 
+      // 「本该是个数组、结果不是」的字段**必须算进 dropped**：不算的话这次加载
+      // 看起来一切正常（0 条任务、0 条被跳过），顶部提示条与设置页的警告都不
+      // 出现，而下一次写盘就把文件重写成「没有任务」的那一份。
+      // 条数说不准（那个字段已经不是列表了），按一条记 —— 这个数字的作用只是
+      // 让用户知道「有东西被跳过了，原文在备份里」，精确条数在这条路上无从谈起。
+      const brokenFields =
+        (tasksRaw === undefined || Array.isArray(tasksRaw) ? 0 : 1) +
+        (anniversariesRaw === undefined || Array.isArray(anniversariesRaw) ? 0 : 1)
+
       // 有记录被跳过就留一份原文：这些记录进不了内存，但用户还有机会人工抢救。
       // 与整体损坏那一路的区别是**复制**而不是改名 —— 活文件留在原地，
       // 剩下的好记录照常工作，下次 flush 才把它覆盖成只含好记录的一份。
-      const dropped = incoming.length - tasks.length + (incomingAnniversaries.length - anniversaries.length)
+      const dropped =
+        incoming.length - tasks.length +
+        (incomingAnniversaries.length - anniversaries.length) +
+        brokenFields
       if (dropped > 0) {
         this.droppedCount = dropped
         this.copyAside('dropped')
@@ -362,6 +376,10 @@ function isIntArrayInRange(value: unknown, lo: number, hi: number): value is num
  * 重复规则。三个频率共有的 `every` 必须是 ≥ 1 的有限数：缺了它
  * `matchesDay` 会走到 `x % undefined === NaN`，规则**静默**永不命中 ——
  * 比抛错更难发现，所以按不合法处理。
+ *
+ * `days` 除了「每个元素都是合法星期/号数」，还**必须非空**：空数组会让
+ * `includes` 永远为 false，同样是「静默永不命中」。编辑器拦得住（没选星期
+ * 就不让提交），但手工编辑过的文件与将来某条新写入路径拦不住。
  */
 function normalizeRule(value: unknown): RecurrenceRule | null {
   if (value === null || typeof value !== 'object') return null
@@ -374,10 +392,10 @@ function normalizeRule(value: unknown): RecurrenceRule | null {
     case 'daily':
       return { freq: 'daily', every, skipWeekend }
     case 'weekly':
-      if (!isIntArrayInRange(r.days, 0, 6)) return null
+      if (!isIntArrayInRange(r.days, 0, 6) || r.days.length === 0) return null
       return { freq: 'weekly', every, days: [...(r.days as Weekday[])].sort(), skipWeekend }
     case 'monthly':
-      if (!isIntArrayInRange(r.days, 1, 31)) return null
+      if (!isIntArrayInRange(r.days, 1, 31) || r.days.length === 0) return null
       return { freq: 'monthly', every, days: [...r.days].sort((a, b) => a - b), skipWeekend }
     default:
       return null

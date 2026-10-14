@@ -202,21 +202,20 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     store = new Store(join(app.getPath('userData'), 'todo-reminder.json'))
-    if (store.corruptBackupPath !== null) {
-      notices.raise({
-        id: 'corrupt-backup',
-        level: 'error',
-        text: `数据文件损坏，已备份到 ${store.corruptBackupPath}`,
-        action: { label: '打开所在文件夹', windowAction: 'open-data-dir' },
-        at: Date.now()
-      })
-    } else if (store.droppedTaskCount > 0) {
+    // 这几条判据的顺序**不能反**。`corruptBackupPath` 在「有记录被跳过」与
+    // 「读到更新的版本」这两条路上也会被写上（都走 store 的 copyAside），
+    // 先看它就会把「有几条记录形状不合法」说成「数据文件损坏」—— 而文件
+    // 明明好好的，用户会以为整份数据全没了。判据是各自的标记字段，
+    // 那条路径只用来填「备份在哪」（设置页那句警告是同一条规矩）。
+    const backup = store.corruptBackupPath
+    const backupTail = backup === null ? '' : `；原文备份在 ${backup}`
+    if (store.droppedTaskCount > 0) {
       // 语法合法、字段半截的记录会被深校验拦下（见 store.ts 的 normalizeTask）。
       // 拦下不等于可以不出声 —— 静默少几条任务比报错更让人困惑
       notices.raise({
         id: 'tasks-dropped',
         level: 'warn',
-        text: `${store.droppedTaskCount} 条记录形状不合法，已跳过；原文备份在 ${store.corruptBackupPath}`,
+        text: `${store.droppedTaskCount} 条记录形状不合法，已跳过${backupTail}`,
         action: { label: '打开所在文件夹', windowAction: 'open-data-dir' },
         at: Date.now()
       })
@@ -226,7 +225,16 @@ if (!app.requestSingleInstanceLock()) {
       notices.raise({
         id: 'file-too-new',
         level: 'warn',
-        text: `数据文件来自更新的版本（v${store.newerFileVersion}），当前版本可能读不全；原文已备份到 ${store.corruptBackupPath}`,
+        text: `数据文件来自更新的版本（v${store.newerFileVersion}），当前版本可能读不全${backupTail}`,
+        action: { label: '打开所在文件夹', windowAction: 'open-data-dir' },
+        at: Date.now()
+      })
+    } else if (backup !== null) {
+      // 走到这里才是真的解析不了（store.ts 的 load 里 catch 那一路）
+      notices.raise({
+        id: 'corrupt-backup',
+        level: 'error',
+        text: `数据文件损坏，已备份到 ${backup}`,
         action: { label: '打开所在文件夹', windowAction: 'open-data-dir' },
         at: Date.now()
       })

@@ -515,6 +515,42 @@ console.log('\n--- store.ts ---')
   check('活文件留在原地（跳过走复制，不走改名）', existsSync(file), true)
   check('没跳过时计数为 0', new Store(join(dir, 'clean.json')).droppedTaskCount, 0)
 
+  // 6b. 字段「本该是数组、结果不是」：不能当成「本来就没有」。
+  //     当成没有的话，这次加载看起来一切正常（0 条任务、0 条跳过），顶部提示条
+  //     与设置页的警告都不出现，而下一次写盘就把文件重写成「没有任务」的那一份
+  //     —— 与 store.ts 顶部「待办数据比喝水记录珍贵得多」那条取向正相反
+  const brokenField = join(dir, 'broken-field.json')
+  writeFileSync(
+    brokenField,
+    JSON.stringify({ version: FILE_VERSION, tasks: { p1: { id: 'p1' } }, anniversaries: [], settings: {} }),
+    'utf-8'
+  )
+  const s6c = new Store(brokenField)
+  check('tasks 不是数组：读进来是 0 条', s6c.tasks.length, 0)
+  check('tasks 不是数组：也要记进跳过计数（否则提示条不出现）', s6c.droppedTaskCount, 1)
+  check('tasks 不是数组：原文有备份（不然没得抢救）', typeof s6c.corruptBackupPath, 'string')
+  const noField = join(dir, 'no-field.json')
+  writeFileSync(noField, JSON.stringify({ version: FILE_VERSION, settings: {} }), 'utf-8')
+  check('字段压根不存在时不算跳过（老文件就是这样）', new Store(noField).droppedTaskCount, 0)
+
+  // 6c. `days` 是空数组：`matchesDay` 里 `includes` 永远为 false，规则**静默**
+  //     永不命中。编辑器拦得住（没选星期不让提交），手工编辑过的文件拦不住
+  const emptyDays = join(dir, 'empty-days.json')
+  writeFileSync(
+    emptyDays,
+    JSON.stringify({
+      version: FILE_VERSION, anniversaries: [], settings: {},
+      tasks: [
+        { ...recBase, id: 'empty-weekly', rule: { freq: 'weekly', every: 1, days: [], skipWeekend: false }, remindTime: '09:00' },
+        { ...recBase, id: 'empty-monthly', rule: { freq: 'monthly', every: 1, days: [], skipWeekend: false }, remindTime: '09:00' }
+      ]
+    }),
+    'utf-8'
+  )
+  const s6d = new Store(emptyDays)
+  check('每周规则 days 为空数组 → 拦下', s6d.tasks.length, 0)
+  check('两条空规则都记进跳过计数', s6d.droppedTaskCount, 2)
+
   // 7. 更新不存在的 id
   check('更新不存在的 id 返回 null', s6.updateTask('nope', { title: 'x' }), null)
 
