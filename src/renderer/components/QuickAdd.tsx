@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type { TaskDraft } from '@shared/commands'
-import { nextDayStart, startOfDay } from '@shared/time'
+import { nextDayStart, nextHalfHourClock, startOfDay } from '@shared/time'
 
 /**
  * 快速添加小窗的全部内容。
@@ -12,12 +12,14 @@ import { nextDayStart, startOfDay } from '@shared/time'
 export function QuickAdd(): JSX.Element {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [title, setTitle] = useState('')
-  const [time, setTime] = useState(defaultClock)
+  // 默认时刻的规矩在 shared/time.ts 的 nextHalfHourClock：下一个半点，
+  // 而且**不跨午夜**（跨了就退回 23:59，否则「今天这个点」会算出过去的时刻）
+  const [time, setTime] = useState(() => nextHalfHourClock(Date.now()))
 
   useEffect(() => {
     const reset = (): void => {
       setTitle('')
-      setTime(defaultClock())
+      setTime(nextHalfHourClock(Date.now()))
       inputRef.current?.focus()
       inputRef.current?.select()
     }
@@ -119,14 +121,6 @@ export function QuickAdd(): JSX.Element {
       </div>
     </form>
   )
-}
-
-/** 下一个半点的 'HH:mm'。默认值别是「现在」—— 现在的意思是立刻就过期 */
-function defaultClock(): string {
-  const d = new Date()
-  d.setSeconds(0, 0)
-  d.setMinutes(d.getMinutes() + (30 - (d.getMinutes() % 30)))
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 /**

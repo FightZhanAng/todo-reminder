@@ -41,9 +41,26 @@ export function atTimeOfDay(dayTs: number, hm: string): number {
   return d.getTime()
 }
 
-/** 某年某月（月为 1-12）的天数 */
+/** 某年某月（月为 1-12）的天数。月份越界给 0 —— 别让 `new Date` 替我们滚年 */
 export function daysInMonth(year: number, month1based: number): number {
+  if (!Number.isInteger(month1based) || month1based < 1 || month1based > 12) return 0
   return new Date(year, month1based, 0).getDate()
+}
+
+/**
+ * 「下一个半点」的 'HH:mm'，用作快速添加窗的默认时刻。
+ *
+ * 默认值不能是「现在」—— 现在的意思就是立刻就过期。也**不能跨过午夜**：
+ * 那个半点已经属于明天，而它会被「今天这个点」那颗按钮用掉，算出来的截止
+ * 时刻是**今天**的，于是那个时刻落在过去，`dueNow` 的 `at <= createdAt`
+ * 一挡，这条任务永远不会提醒（界面却照常显示它今天到期）。
+ * 所以跨午夜时退回今天的最后一分钟。
+ */
+export function nextHalfHourClock(now: number): string {
+  const d = new Date(now)
+  d.setSeconds(0, 0)
+  d.setMinutes(d.getMinutes() + (30 - (d.getMinutes() % 30)))
+  return dayKey(d.getTime()) === dayKey(now) ? formatClock(d.getTime()) : '23:59'
 }
 
 /**

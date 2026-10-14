@@ -27,7 +27,7 @@ function at(y: number, m: number, d: number, h = 0, min = 0, s = 0): number {
 
 import { DEFAULT_SETTINGS } from '../src/shared/defaults'
 import type { DeadlineTask, RecurringTask, SomedayTask, Task } from '../src/shared/types'
-import { addDays, atTimeOfDay, dayIndex, dayKey, daysInMonth, parseHM, startOfDay } from '../src/shared/time'
+import { addDays, atTimeOfDay, dayIndex, dayKey, daysInMonth, nextHalfHourClock, parseHM, startOfDay } from '../src/shared/time'
 import { expandRecurrence, matchesDay, nextOccurrence } from '../src/shared/recurrence'
 import type { RecurrenceRule } from '../src/shared/types'
 import { dueNow, isRemindable, remindAtOf } from '../src/shared/remind'
@@ -154,10 +154,23 @@ check('daysInMonth 1月', daysInMonth(2026, 1), 31)
 check('daysInMonth 2月平年', daysInMonth(2026, 2), 28)
 check('daysInMonth 2月闰年', daysInMonth(2024, 2), 29)
 check('daysInMonth 4月', daysInMonth(2026, 4), 30)
+// 月份越界：以前是 `new Date(2026, 13, 0)` 自己滚到明年 1 月，于是 13 月「有 31 天」
+check('daysInMonth 13 月给 0', daysInMonth(2026, 13), 0)
+check('daysInMonth 0 月给 0', daysInMonth(2026, 0), 0)
 check('parseHM 正常', JSON.stringify(parseHM('09:05')), JSON.stringify({ h: 9, m: 5 }))
 check('parseHM 垃圾输入不炸', JSON.stringify(parseHM('abc')), JSON.stringify({ h: 0, m: 0 }))
 check('dayIndex 相邻两天差 1', dayIndex(at(2026, 9, 16)) - dayIndex(at(2026, 9, 15)), 1)
 check('dayIndex 跨月差 1', dayIndex(at(2026, 9, 1)) - dayIndex(at(2026, 8, 31)), 1)
+
+// 「下一个半点」——快速添加窗的默认时刻（2026-10-14 修）
+check('下一个半点：09:12 → 09:30', nextHalfHourClock(at(2026, 9, 16, 9, 12)), '09:30')
+check('下一个半点：09:00 → 09:30', nextHalfHourClock(at(2026, 9, 16, 9, 0)), '09:30')
+check('下一个半点：已过半点的整点就取下一个', nextHalfHourClock(at(2026, 9, 16, 9, 30)), '10:00')
+// 跨午夜时那个半点已经属于明天，而「今天这个点」算出的是**今天**的截止时刻：
+// 给 00:15 会落在过去（`at <= createdAt` 一挡，这条任务永远不提醒）
+check('下一个半点不跨午夜：23:45 → 23:59', nextHalfHourClock(at(2026, 9, 16, 23, 45)), '23:59')
+check('下一个半点不跨午夜：23:30 → 23:59', nextHalfHourClock(at(2026, 9, 16, 23, 30)), '23:59')
+check('零点刚过照常给半点', nextHalfHourClock(at(2026, 9, 16, 0, 3)), '00:30')
 
 console.log('\n--- recurrence.ts ---')
 {
