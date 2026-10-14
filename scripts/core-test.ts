@@ -1255,6 +1255,9 @@ console.log('\n--- commands.ts ---')
   const run = (cmd: Command) => applyCommand(store, cmd, now)
   const byId = (id: string) => store.tasks.find((t) => t.id === id)
   const last = () => store.tasks[store.tasks.length - 1]
+  /** 这一条任务此刻会不会弹 —— 只问它一个，别把 store 里别的任务算进来 */
+  const dueOf = (id: string, t: number): number =>
+    dueNow(store.tasks.filter(isRemindable).filter((x) => x.id === id), S, t).length
 
   // ---- task:create ----
   const dl: TaskDraft = {
@@ -1382,8 +1385,42 @@ console.log('\n--- commands.ts ---')
   // 判别性：buildTask 会把这两者写成 null / 0，若回填丢失这里会 FAIL
   check('同类型 edit：周期 lastDoneDay 保留', rAfter.lastDoneDay, '2026-09-16')
   check('同类型 edit：周期 streak 保留（不为 0）', rAfter.streak, 3)
-  // firedFor 仍清（提醒时刻可能改过，旧的已提醒标记不成立，必须重新具备提醒资格）
-  check('同类型 edit：周期 firedFor 仍被清', rAfter.firedFor, null)
+  // 2026-10-14 修复：提醒点没变就不清 firedFor。原来是无条件清空，理由是
+  // 「提醒时刻**可能**改过」—— 但那是可能，不是必然：只改标题时提醒点没变，
+  // 清掉的后果是下一个 tick（10 秒内）为同一件事再弹一次通知。
+  // 这条任务是今天已做完的（提醒点算出来是 null），前后一致 → 记号原样留下
+  check('同类型 edit：提醒点没变时 firedFor 保留', rAfter.firedFor, at(2026, 9, 16, 9, 0))
+
+  // 同一条规则的判别性用例：一个已经弹过的截止型任务，
+  // 只改标题 → 不该重弹；改了提醒点 → 才重新具备资格
+  const onceFired = run({
+    type: 'task:create',
+    draft: {
+      kind: 'deadline', title: '已经弹过', important: false,
+      dueDay: at(2026, 9, 16), allDay: false, time: '17:00'
+    }
+  }).touchedTaskId!
+  // 提醒点 = 17:00 - 15 分钟 = 16:45，与 now（16:00）无关 —— 这里只比「弹过没弹过」
+  store.updateTask(onceFired, { firedFor: at(2026, 9, 16, 16, 45) })
+  check('编辑前：已经弹过的不再弹', dueOf(onceFired, at(2026, 9, 16, 16, 50)), 0)
+  run({
+    type: 'task:edit', id: onceFired,
+    draft: {
+      kind: 'deadline', title: '已经弹过（改个错别字）', important: false,
+      dueDay: at(2026, 9, 16), allDay: false, time: '17:00'
+    }
+  })
+  check('只改标题：firedFor 保留', byId(onceFired)!.firedFor, at(2026, 9, 16, 16, 45))
+  check('只改标题：不会重弹（修复前这里会是 1）', dueOf(onceFired, at(2026, 9, 16, 16, 50)), 0)
+  run({
+    type: 'task:edit', id: onceFired,
+    draft: {
+      kind: 'deadline', title: '已经弹过（改时刻）', important: false,
+      dueDay: at(2026, 9, 16), allDay: false, time: '18:00'
+    }
+  })
+  check('改了提醒点：firedFor 被清掉', byId(onceFired)!.firedFor, null)
+  check('改了提醒点：新的提醒点会弹', dueOf(onceFired, at(2026, 9, 16, 17, 45)), 1)
 
   // 已完成的截止型 → 同类型 edit → completedAt 保留（否则变回未完成、重新进分组）
   const dEdit = run({

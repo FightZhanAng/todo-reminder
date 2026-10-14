@@ -1,5 +1,6 @@
 import { actionPatch, type TaskAction } from './actions'
 import { tsFromDayKey } from './calendar'
+import { isRemindable, remindAtOf } from './remind'
 import { atTimeOfDay, startOfDay } from './time'
 import type {
   Anniversary, AnniversaryEdit, DeadlineTask, RecurrenceRule, RecurringTask,
@@ -247,6 +248,9 @@ function route(store: CommandStore, cmd: Command, now: number): CommandResult {
         old,
         buildTask(store.settings, cmd.draft, now, old.id, old.createdAt, old.deletedAt)
       )
+      // 顺序有讲究：上面先把 completedAt 回填好，这里算出来的才是这条任务
+      // 编辑**之后**真正的提醒点
+      carryFired(old, next, store.settings, now)
       if (store.replaceTask(next) === null) return notFound(cmd.id)
       return { ok: true, touchedTaskId: old.id }
     }
@@ -391,11 +395,10 @@ function findTask(store: CommandStore, id: string): Task | undefined {
  * 又让幂等挡板失效，同一条今天做过的提醒会再弹一次；`streak` 直接归零是可见的
  * 数据丢失。
  *
- * **只在同一类型内回填**：跨类型切换（如截止型 → 清单池）时这些字段本不适用，
+ * 只在同一类型内回填**完成态**：跨类型切换（如截止型 → 清单池）时这些字段本不适用，
  * 保持 buildTask 的整条重建语义，不做回填。
  *
- * `firedFor` 是**有意不回填**的例外：编辑可能改了提醒时刻（dueAt / leadMin /
- * remindTime），旧的「已提醒过」标记不再成立，任务必须重新具备提醒资格。
+ * `firedFor` 不在这里 —— 它是另一件事，见 `carryFired`。
  */
 function carryCompletion(old: Task, next: Task): Task {
   if (old.kind !== next.kind) return next
@@ -406,6 +409,30 @@ function carryCompletion(old: Task, next: Task): Task {
     ;(next as DeadlineTask).completedAt = (old as DeadlineTask).completedAt
   }
   return next
+}
+
+/**
+ * 编辑之后「已经弹过」的记号怎么处理。
+ *
+ * `buildTask` 一律把 `firedFor` 写成 null，理由是「提醒时刻可能改过，旧的
+ * 已提醒标记不再成立」—— 但那是**可能**，不是必然：只改标题时提醒点没有变，
+ * 清掉的后果是下一个 tick（10 秒内）为同一条任务再弹一次通知。用户刚看完
+ * 通知、进来改一个错别字，又被弹一遍，看起来就是「这应用通知有 bug」。
+ *
+ * 所以判据收紧成「提醒点**真的**变了才重新具备资格」：比较编辑前后的提醒点，
+ * 相同就把旧记号带过去。两个都为 null（今天已经做完、已完成、软删……）
+ * 同样算「没变」—— 那种情况下任务本来就不在提醒范围内，保留旧值只影响
+ * 「取消完成 / 撤销删除之后会不会被追着弹」，而那两处的意图正是别重弹
+ * （见 task:uncomplete 与 task:restore 的注释）。
+ *
+ * 跨类型编辑一律清：提醒模型整个换了，旧记号对新形状没有意义。
+ */
+function carryFired(old: Task, next: Task, settings: Settings, now: number): void {
+  if (old.kind !== next.kind) return
+  if (!isRemindable(old) || !isRemindable(next)) return
+  if (remindAtOf(old, settings, now) === remindAtOf(next, settings, now)) {
+    next.firedFor = old.firedFor
+  }
 }
 
 function opts(store: CommandStore): { snoozeMinutes: number } {
