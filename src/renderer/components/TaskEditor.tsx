@@ -284,21 +284,22 @@ export function TaskEditor({
               </span>
             </div>
 
-            {f.freq !== 'daily' && (
-              <div className="field">
-                <span className="field__label">周末</span>
-                <span className="field__control">
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={f.skipWeekend}
-                      onChange={(e) => set('skipWeekend', e.target.checked)}
-                    />
-                    跳过后移到下一个工作日
-                  </label>
-                </span>
-              </div>
-            )}
+            {/* 三种频率都摆这一格：`skipWeekend` 是规则的一部分（`matchesDay`
+                的三个分支都读它），只给「每周/每月」看的话，一条「每天+跳周末」
+                的任务在这里既看不见这个开关、又会在保存时被静默改成「每天」 */}
+            <div className="field">
+              <span className="field__label">周末</span>
+              <span className="field__control">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={f.skipWeekend}
+                    onChange={(e) => set('skipWeekend', e.target.checked)}
+                  />
+                  跳过周末，不补到工作日
+                </label>
+              </span>
+            </div>
 
             {/* 预览放在这一段最后：上面的频率 / 间隔 / 星期 / 几号 / 时刻 / 周末
                 每一项都会改变结果，摆在中间会读成「只反映它上面的几项」 */}
@@ -492,13 +493,19 @@ function toDraft(f: Form, defaultLeadMin: number): TaskDraft | string {
  * 单独一个函数是因为**「下次触发」的预览和真正提交的 draft 必须是同一条规则** ——
  * 两处各算一遍的话，预览说「下周三」而实际排到周四这类错位迟早出现，
  * 而且看起来会像是排期算错了。
+ *
+ * `skipWeekend` 三种频率**一律照表单原样带上**，不在这里替谁归零（见下面
+ * `daily` 那一条）。
  */
 function ruleOf(f: Form): RecurrenceRule | string {
   const every = clamp(num(f.every, 1), 1, 99)
   if (f.freq === 'weekly' && f.weekdays.length === 0) return '至少选一个星期'
   if (f.freq === 'monthly' && f.monthDays.length === 0) return '至少选一个日子'
   return f.freq === 'daily'
-    ? { freq: 'daily', every, skipWeekend: false }
+    // 这里**不能**写死 false：那会把已有的「每天+跳周末」在用户只改个标题时
+    // 静默改成「每天」。开关现在是看得见的（三种频率都摆那一格），
+    // 用户想关掉自己去关
+    ? { freq: 'daily', every, skipWeekend: f.skipWeekend }
     : f.freq === 'weekly'
       ? { freq: 'weekly', every, days: [...f.weekdays].sort(), skipWeekend: f.skipWeekend }
       : {

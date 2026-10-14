@@ -1339,6 +1339,26 @@ async function mainWindowPass() {
   // 切周期 → 每周：规则那一块要长出来
   await evalIn(win, `document.querySelectorAll('.segmented')[0].children[1].click(), 'ok'`)
   await sleep(250)
+
+  // 2026-10-14：刚切成「周期」（频率还是默认的每天）时，「周末」这一格就该在，
+  // 而且文案得说清是「跳过」—— `matchesDay` 的实现就是整次跳过（`return false`），
+  // 不是顺延到下一个工作日。文案说成顺延的话，用户会按一个不会发生的日期去安排事。
+  // 以前这格只在每周/每月出现，于是一条「每天+跳周末」的任务在这里既看不见开关、
+  // 保存时又会被静默改成「每天」。
+  const weekendField = await evalIn(win, `(() => {
+    const f = [...document.querySelectorAll('.field')].find((el) => {
+      const l = el.querySelector('.field__label')
+      return l && l.textContent === '周末'
+    })
+    return {
+      exists: f !== undefined,
+      text: f ? f.querySelector('label').textContent : null
+    }
+  })()`)
+  ok('每天也摆着「周末」这一格', weekendField.exists === true, weekendField)
+  ok('它的文案说清了是跳过、不补到工作日',
+    weekendField.text === '跳过周末，不补到工作日', weekendField.text)
+
   await evalIn(win, `document.querySelectorAll('.segmented')[1].children[1].click(), 'ok'`)
   await sleep(250)
   const weekly = await evalIn(win, `(() => ({
