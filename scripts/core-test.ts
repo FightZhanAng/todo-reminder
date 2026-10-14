@@ -844,22 +844,49 @@ console.log('\n--- 周期任务的「推迟」---')
   })
   check('跨午夜推迟：推起点未被吞掉', remindAtOf(cross, S, at(2026, 9, 16, 23, 56)), at(2026, 9, 17, 0, 5))
   check('跨午夜推迟：次日 00:05 弹一次', dueNow([cross], S, at(2026, 9, 17, 0, 5)).length, 1)
-  // 已知取舍：推迟点落到次日 00:05 后，它会一直「不早于今天」，于是**次日**
-  // 那个 23:55 的实例被并入、当天不再单独弹（人在这天已经在 00:05 被提醒过）。
-  // 再下一天 snoozeUntil 早于新一天零点，自动失效、规则恢复。
+  // 2026-10-14 修复：推迟点弹过之后，**次日**的实例不能被它吞掉。
+  // 修复前 recurringRemindAt 只比「snoozeUntil 不早于今天」，于是推迟点落到
+  // 次日时会一直命中它，firedFor 恒等于那个推迟点，次日的常规点永远排不上
+  // —— 而且不会自愈（firedFor 不再变化，snoozeUntil 也不再被清）。
   const crossFired = { ...cross, firedFor: at(2026, 9, 17, 0, 5) }
   check(
-    '跨午夜推迟：推迟点所在当天不再重复',
-    remindAtOf(crossFired, S, at(2026, 9, 17, 12, 0)),
-    at(2026, 9, 17, 0, 5)
+    '跨午夜推迟：推迟点所在当天不重复（12:00）',
+    dueNow([crossFired], S, at(2026, 9, 17, 12, 0)).length,
+    0
   )
-  check('跨午夜推迟：当晚不再弹', dueNow([crossFired], S, at(2026, 9, 17, 23, 55)).length, 0)
   check(
-    '跨午夜推迟：再下一天回到规则（23:55）',
+    '跨午夜推迟：当天回到规则（23:55）',
+    remindAtOf(crossFired, S, at(2026, 9, 17, 12, 0)),
+    at(2026, 9, 17, 23, 55)
+  )
+  check('跨午夜推迟：当晚 23:55 正常弹', dueNow([crossFired], S, at(2026, 9, 17, 23, 55)).length, 1)
+  check(
+    '跨午夜推迟：再下一天仍是规则（23:55）',
     remindAtOf(crossFired, S, at(2026, 9, 18, 12, 0)),
     at(2026, 9, 18, 23, 55)
   )
   check('跨午夜推迟：再下一天 23:55 正常弹', dueNow([crossFired], S, at(2026, 9, 18, 23, 55)).length, 1)
+
+  // 同一形状的第二种显形，也是最刺眼的那种：常规点是 09:00（每天唯一的一次）
+  // 时，被吞掉的那一次就是用户当天全部的提醒 —— 23:55 收工顺手点一下推迟，
+  // 第二天这条每日提醒就永远不再响了
+  const dailyCross = recurring({ remindTime: '09:00', snoozeUntil: at(2026, 9, 17, 0, 5) })
+  check(
+    '跨午夜推迟（每日 09:00）：推起点未被吞掉',
+    remindAtOf(dailyCross, S, at(2026, 9, 16, 23, 56)),
+    at(2026, 9, 17, 0, 5)
+  )
+  const dailyCrossFired = { ...dailyCross, firedFor: at(2026, 9, 17, 0, 5) }
+  check(
+    '跨午夜推迟（每日 09:00）：次日 08:00 不提前弹',
+    dueNow([dailyCrossFired], S, at(2026, 9, 17, 8, 0)).length,
+    0
+  )
+  check(
+    '跨午夜推迟（每日 09:00）：次日 09:00 照常弹',
+    dueNow([dailyCrossFired], S, at(2026, 9, 17, 9, 0)).length,
+    1
+  )
 
   // 已完成 / 今天不该做时，推迟不改变 null
   check(

@@ -35,28 +35,41 @@ export function remindAtOf(task: RemindableTask, settings: Settings, now: number
  * 所以 `snoozeUntil` 可以直接顶替它；而周期任务的提醒点是由规则**算**出来的，
  * 每天都有一个新值，直接顶替等于把之后的每一天都屏蔽掉。
  *
- * 判据是「`snoozeUntil` 不早于今天」。一次比较同时解决三件事：
+ * 只认两种推迟点（都在**今天之内**）：
  *
- * 1. 推迟点没到时返回它 → 推迟期内不弹；
- * 2. 推迟点弹过之后仍然返回它，而它此时等于 `firedFor`，被 `dueNow` 的幂等
- *    规则挡掉 → 当天不再重复。**这一步是关键**：若此处改回常规提醒点，它
- *    ≤ now 且 ≠ firedFor，会立刻再弹一次 —— 这正是修复前周期任务点「推迟」
- *    原地重弹的原因（`firedFor` 被清空 + 提醒点回落到 09:00）；
- * 3. 到了第二天，旧的 `snoozeUntil` 早于新一天的零点，自然失效、规则恢复 ——
- *    不需要任何清理代码。
+ * 1. **还没走完**（`snooze > now`，或者到了点但调度器还没记上账
+ *    `firedFor !== snooze`）→ 就用它顶着，免得常规时刻在这中间先弹一次；
+ * 2. **已经弹过，而且它顶掉的就是今天这个常规点**（`snooze` 晚于今天的
+ *    `remindTime`）→ 继续返回它，而它此时等于 `firedFor`，被 `dueNow` 的
+ *    幂等规则挡掉 → 当天不再重复。**这一步是关键**：若此处改回常规提醒点，
+ *    它 ≤ now 且 ≠ firedFor，会立刻再弹一次 —— 这正是修复前周期任务点
+ *    「推迟」原地重弹的原因。
  *
- * 判据为什么不是「晚于 base」：那样 23:55 推迟到次日 00:05 会在跨天瞬间失效
- * （新一天的 base 必然晚于那个推迟点），推迟被整整吞掉一天。用「不早于今天」
- * 则只跟当天的零点比，跨午夜照样生效。
+ * 跨午夜的推迟（23:55 推到次日 00:05）走第 1 条：推迟点在次日到来时照常弹。
+ * 弹过之后它比**次日**的常规点更早，第 2 条不成立，于是规则当场恢复 ——
+ * 这正是 2026-10-14 修掉的缺陷：原来只比「不早于今天」，推迟点落在次日时
+ * 它会一直命中第 2 条，`firedFor` 恒等于那个推迟点，次日那一整天的实例
+ * （09:00 那种每天唯一的一次）被静默吞掉，而且永远不会自愈。
+ *
+ * 判据为什么不是「晚于 base（今天的常规点）」：那样 23:55 推迟到次日 00:05
+ * 会在跨天瞬间失效（新一天的 base 必然晚于那个推迟点），推迟被整整吞掉一天。
+ * 早于今天的 `snoozeUntil` 两条都不命中，自然失效、规则恢复 ——
+ * 不需要任何清理代码。
  */
 function recurringRemindAt(task: RecurringTask, now: number): number | null {
   if (task.lastDoneDay === dayKey(now)) return null
   const today = startOfDay(now)
   if (!matchesDay(task.rule, startOfDay(task.createdAt), today)) return null
 
-  if (task.snoozeUntil !== null && task.snoozeUntil > today) return task.snoozeUntil
-
-  return atTimeOfDay(today, task.remindTime)
+  const regular = atTimeOfDay(today, task.remindTime)
+  const snooze = task.snoozeUntil
+  if (snooze !== null) {
+    // 还没走完：推迟点在今天以内，而且要么还没到点、要么到了点还没记上账
+    if (snooze >= today && (snooze > now || task.firedFor !== snooze)) return snooze
+    // 已经弹过：只有「它顶掉的就是今天这个常规点」时才继续顶着它
+    if (regular < snooze) return snooze
+  }
+  return regular
 }
 
 /**
