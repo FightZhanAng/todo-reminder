@@ -109,12 +109,26 @@ function termJulianDay(year: number, index: number): number {
   return jd
 }
 
-/** 一整年的节气。24 个节气全部落在本年（小寒 1 月 5 日、冬至 12 月 21 日前后） */
+/**
+ * 一整年的节气。24 个节气全部落在本年（小寒 1 月 5 日、冬至 12 月 21 日前后）。
+ *
+ * **按年缓存**：算一年要 24 个节气各自迭代到 1e-7 度（实测一次约 60 µs），
+ * 而日历一屏 42 个格子每个都要问一遍「这天是不是节气」—— 一屏就是 2.7 ms，
+ * 每次 `now` 往前走一分钟又重算一遍（实测缓存后 0.6 ms）。
+ * 与 `holiday.ts` 的 `markMap` 同一个理由：同一张小表被一屏问 42 次。
+ * 返回值与其元素是**共享**的，调用方不要改。
+ */
+const termCache = new Map<number, SolarTerm[]>()
+
 export function solarTermsOf(year: number): SolarTerm[] {
-  return SOLAR_TERMS.map((name, index) => {
+  const hit = termCache.get(year)
+  if (hit !== undefined) return hit
+  const out = SOLAR_TERMS.map((name, index) => {
     const { key, clock } = beijingOf(termJulianDay(year, index))
     return { name, key, clock, longitude: (285 + 15 * index) % 360 }
   })
+  termCache.set(year, out)
+  return out
 }
 
 /**

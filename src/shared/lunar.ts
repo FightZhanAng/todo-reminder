@@ -136,18 +136,49 @@ export function lunarYearDays(year: number): number {
   return sum + leapDays(year)
 }
 
+/**
+ * 公历/农历转换共用的前缀和：`yearOffsets[i]` = 从 `LUNAR_MIN_YEAR` 到
+ * `LUNAR_MIN_YEAR + i` **之前**一共过了多少天（`yearOffsets[0] === 0`）。
+ *
+ * 为什么要有它：`lunarOf` 与 `solarFromLunar` 原本都从 1900 年逐年累加
+ * `lunarYearDays`（一年还要再加 12 个月），一次 O(126) 起步 —— 实测每次
+ * 调用 20 µs 上下。表格只有两百多个数，摊平一次就把两个函数都降到 8 µs。
+ * （2026-10-14 顺手做的：原本那条「日历每帧重算、数量级偏大」的怀疑实测
+ * 只有一屏 1 ms 上下，见 term.ts 的 termCache —— 两个缓存都按 `holiday.ts`
+ * 的 `markMap` 那条路子写，不改任何语义。）
+ */
+let yearOffsets: number[] | null = null
+
+function offsets(): number[] {
+  if (yearOffsets !== null) return yearOffsets
+  const out: number[] = [0]
+  let sum = 0
+  for (let y = LUNAR_MIN_YEAR; y <= LUNAR_MAX_YEAR; y++) {
+    sum += lunarYearDays(y)
+    out.push(sum)
+  }
+  yearOffsets = out
+  return out
+}
+
 /** 公历某天 → 农历。超出 1900–2100 给 null（不猜） */
 export function lunarOf(ts: number): LunarDate | null {
   let offset = dayIndex(ts) - BASE_DAY
   if (offset < 0) return null
 
-  let year = LUNAR_MIN_YEAR
-  for (; year <= LUNAR_MAX_YEAR; year++) {
-    const days = lunarYearDays(year)
-    if (offset < days) break
-    offset -= days
+  // 落在哪一年：前缀和上二分。`offsets()` 递增，且末项是整张表的总天数，
+  // 所以 `offset >= 末项` 就等价于原来的「年号越过 LUNAR_MAX_YEAR」
+  const table = offsets()
+  if (offset >= table[table.length - 1]!) return null
+  let lo = 0
+  let hi = table.length - 1
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1
+    if (table[mid]! <= offset) lo = mid
+    else hi = mid
   }
-  if (year > LUNAR_MAX_YEAR) return null
+  const year = LUNAR_MIN_YEAR + lo
+  offset -= table[lo]!
 
   const leap = leapMonth(year)
   let month = 1
@@ -187,8 +218,7 @@ export function solarFromLunar(
   const length = isLeap ? leapDays(year) : monthDays(year, month)
   if (day < 1 || day > length) return null
 
-  let days = 0
-  for (let y = LUNAR_MIN_YEAR; y < year; y++) days += lunarYearDays(y)
+  let days = offsets()[year - LUNAR_MIN_YEAR]!
   for (let m = 1; m < month; m++) {
     days += monthDays(year, m)
     if (leap === m) days += leapDays(year)
