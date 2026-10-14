@@ -52,7 +52,7 @@ export function TaskEditor({
   const snapshot = state.snapshot!
   const editing = view.id === null ? null : (snapshot.tasks.find((t) => t.id === view.id) ?? null)
   const [form, setForm] = useState<Form>(() =>
-    initialForm(editing, view.kind, snapshot.settings, view.dueDay)
+    initialForm(editing, view.kind, snapshot.settings, view.dueDay, state.now)
   )
   const [problem, setProblem] = useState<string | null>(null)
 
@@ -154,7 +154,7 @@ export function TaskEditor({
             <div className="field">
               <span className="field__label">日期</span>
               <span className="field__control">
-                <DateField value={f.dueDay} onChange={(v) => set('dueDay', v)} />
+                <DateField value={f.dueDay} onChange={(v) => set('dueDay', v)} now={state.now} />
               </span>
             </div>
             <div className="field">
@@ -401,15 +401,23 @@ function NextRuns({
  *
  * `dueDay` 只有从日历进来时才有 —— 它**不改类型**，只换掉「日期」那一格
  * 的初值。周期型与清单池用不到它（它们没有截止日）。
+ *
+ * `now` 是**注入的时钟**（`state.now`），不在这里读 `Date.now()` 或 `new Date()`：
+ * 同一格表里混用两个时钟源，跨零点新建时默认的星期/几号会是「昨天」的，
+ * 用户不留意就得到一条相位错一天的规则；冒烟夹具把 `Date.now` 换成了虚拟
+ * 时钟而 `new Date()` 换不掉，两个来源还会在测试里分叉（那时断言验的是
+ * 真实日期，不是以为在验的虚拟日期）。
  */
 function initialForm(
   task: Task | null,
   kind: TaskKind,
   settings: { defaultLeadMin: number; allDayRemindTime: string },
-  dueDay?: string
+  dueDay: string | undefined,
+  now: number
 ): Form {
-  const today = dueDay ?? dayKey(Date.now())
-  const todayDow = new Date().getDay() as Weekday
+  const today = dueDay ?? dayKey(now)
+  const nowDate = new Date(now)
+  const todayDow = nowDate.getDay() as Weekday
   const base: Form = {
     kind,
     title: '',
@@ -422,7 +430,7 @@ function initialForm(
     freq: 'daily',
     every: '1',
     weekdays: [todayDow],
-    monthDays: [new Date().getDate()],
+    monthDays: [nowDate.getDate()],
     skipWeekend: false,
     remindTime: settings.allDayRemindTime
   }
