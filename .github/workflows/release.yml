@@ -54,12 +54,14 @@ jobs:
             release/*.blockmap
           if-no-files-found: error
 
+      # 发版前要改的只有 .github/release-notes.md（改成「这一版改了什么」，
+      # 不写产物说明 —— 说明在下面那段里）。那份文件是**原样发出去**的，
+      # 别在里面留给维护者看的注释；要留就留在这段 workflow 里。
       - name: 发 Release
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF_NAME}"
-          # 正文 = 中文变更要点（.github/release-notes.md，每次发版前改那一份）+ 产物说明。
-          # 变更要点放在仓库里而不是写死在这段 shell 里：发版前要改的是「这次改了什么」，
+          # 正文 = 中文变更要点 + 产物说明。要点放在仓库里而不是写死在这段 shell 里：
           # 改一份 markdown 比在 YAML 里改一段多行 heredoc 稳妥。
           body="${RUNNER_TEMP}/release-body.md"
           {
