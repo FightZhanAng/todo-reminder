@@ -220,7 +220,7 @@
 14. **自动更新只对安装版（NSIS）有效，便携版只能手动下载。** 更新走 `electron-updater`，
     状态机在 `shared/update.ts`（纯函数、有测试），全项目只有 `main/updater.ts` 碰 electron-updater。
     版本号显示在设置页「更新」组的「当前版本」（`app.getVersion()`，来源是 package.json）。
-    五条容易踩的：
+    六条容易踩的：
 
     - **状态不落盘**。它挂在 `RuntimeState.update` 上 —— 记的是「这一版进程此刻认到的事」，
       写进数据文件只会在下次启动时带来一个必然是过期的值（同 `pausedUntil`）。
@@ -241,6 +241,22 @@
       漏了它的症状很隐蔽：这一次不查了，但 6 小时后还会再查。排程本身是启动 20 秒后首次
       （开局那几秒在抢 IO：读数据文件、建托盘、注册热键），之后每 6 小时；
       定时器一律 `unref()` —— 否则 `app.quit()` 之后进程会被一个 6 小时后的回调吊住，永远退不掉。
+    - **下载慢是那条路被限速，不是本机带宽**（`main/updater.ts` 的 `mirrorInstallerDownload`）。
+      2026-11-06 实测 95 MB 的包直连 GitHub release 只有 **25–30 KB/s**（45 分钟），
+      同一台机器走国内 CDN 是 1.9 MB/s。三条容易误判的：
+      - **用户开了「GitHub 代理」不等于覆盖到了**：这类工具（Watt Toolkit 那一类）靠
+        hosts + 本地 443 反代，只覆盖 `github.com` 那几个域名；release 下载 302 跳到的
+        `release-assets.githubusercontent.com` 不在 hosts 名单里，**一字节都不过反代**。
+        查这类问题的正确姿势是看 app 进程那条 `Established` 连的是哪个 IP，不是看代理开没开。
+      - **只改安装包，别把 `latest.yml` / `releases.atom` 一起改道**：镜像对 `.atom`
+        直接回 403（实测），把版本发现一起换源会让「检查更新」整个坏掉 —— 那比慢 45 分钟严重。
+        所以实现是 `netSession.webRequest.onBeforeRequest` 拦 URL，**不是** `setFeedURL` 换
+        generic provider（后者会让更新清单也跟着来自第三方镜像）。sha512 仍来自 GitHub 上
+        那份 `latest.yml`，所以改道不降低完整性保证；镜像挂了数到两次失败就摘掉拦截退回直连。
+      - **差分下载有个静默的坑**：`%LOCALAPPDATA%\todo-reminder-updater\installer.exe`
+        是差分的基准文件，**它自己那一次下载不完整**（实测比官方资产多 81 字节、sha512 不匹配），
+        electron-updater 于是静默 fallback 全量 —— 症状是「明明只跨一个小版本却要下整包」。
+        判据是拿它的 size / sha512 对上一个 tag `latest.yml` 里的官方值。
 15. **主窗口是无框的，标题带是画的**（`components/TitleBar.tsx`，2026-09-30）。原生那条
     不跟 `nativeTheme` 走，界面切深色时它还是系统那套浅灰。四条别破坏：
    - **横向几何**：左内边距 12px 与 `.head` / `.topbar` 对齐；三个按钮各 42×32（原生 caption

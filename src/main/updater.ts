@@ -37,7 +37,9 @@ import { autoUpdater } from 'electron-updater'
 import {
   friendlyError,
   initialUpdateState,
+  mirrorReleaseUrl,
   sameUpdateState,
+  shouldUseMirror,
   updateReducer,
   updateUnsupportedReason,
   type UpdateEvent,
@@ -79,6 +81,10 @@ function unsupportedReason() {
 export class Updater {
   private state: UpdateState
   private timer: ReturnType<typeof setTimeout> | null = null
+  /** 本次进程里改道过几次（一次都没改道过就说明失败与镜像无关） */
+  private mirrorRedirects = 0
+  /** 改道之后的连续失败次数，到阈值就摘掉镜像拦截 */
+  private mirrorFailures = 0
 
   constructor(private readonly opts: UpdaterOptions) {
     this.state = initialUpdateState(unsupportedReason())
@@ -90,6 +96,7 @@ export class Updater {
     autoUpdater.autoInstallOnAppQuit = true
 
     this.wire()
+    this.mirrorInstallerDownload()
   }
 
   getState(): UpdateState {
@@ -162,6 +169,71 @@ export class Updater {
     clearTimeout(this.timer)
     clearInterval(this.timer)
     this.timer = null
+  }
+
+  /**
+   * 把安装包那一跳改道到国内镜像。
+   *
+   * ## 为什么慢的不是我们
+   *
+   * 2026-11-06 实测：95 MB 的安装包从 GitHub release 直连只有 **25–30 KB/s**
+   * （45 分钟），同一台机器走国内 CDN 是 1.9 MB/s —— 不是带宽，是那条路被限速。
+   * 用户侧的「GitHub 代理」也救不了：这类工具靠 hosts + 本地反代只覆盖
+   * `github.com` 那几个域名，而 release 下载 302 跳到的
+   * `release-assets.githubusercontent.com` 不在名单里，一字节都不过反代。
+   *
+   * ## 为什么拦 URL 而不是换 provider
+   *
+   * `setFeedURL` 换 generic provider 能整条换源，但更新清单（latest.yml）也就
+   * 跟着来自镜像了。这里用 `webRequest.onBeforeRequest` 只改**安装包**那一跳：
+   * 版本发现和 sha512 仍然来自 GitHub，装上的包再由 electron-updater 按那个
+   * sha512 复核 —— 换源不降低完整性保证，镜像被劫持只会导致校验失败。
+   *
+   * 挂在这个 session 上拦得到：`ElectronHttpExecutor` 走
+   * `electron.net.request({ session })`（partition 名 `electron-updater`），
+   * 不是 Node 的 http，所以 Chromium 的 webRequest 管得着（实测改道后 409 KB/s，
+   * 差分下载那些 Range 请求同样命中）。
+   *
+   * ## 镜像挂了不能让更新跟着挂
+   *
+   * 第三方公益站随时可能停，所以两处退路：注册整个包在 try 里（挂不上就走直连），
+   * 以及数着失败次数、到阈值就 `onBeforeRequest(null)` 摘掉拦截退回直连 ——
+   * 慢，但更新仍然能用。`TODO_UPDATE_MIRROR=off` 是留给彻底关掉的开关
+   * （不设用 shared 里的默认前缀，填别的 URL 则换一家镜像）。
+   */
+  private mirrorInstallerDownload(): void {
+    const raw = process.env.TODO_UPDATE_MIRROR?.trim()
+    if (raw?.toLowerCase() === 'off') return
+    const mirror = raw === '' || raw == null ? undefined : raw
+
+    try {
+      const session = autoUpdater.netSession
+      const handler = (details: Electron.OnBeforeRequestListenerDetails, callback: (r: { redirectURL?: string }) => void): void => {
+        if (!shouldUseMirror(this.mirrorFailures)) {
+          callback({})
+          return
+        }
+        const redirected = mirrorReleaseUrl(details.url, mirror)
+        if (redirected !== details.url) this.mirrorRedirects++
+        callback(redirected === details.url ? {} : { redirectURL: redirected })
+      }
+      session.webRequest.onBeforeRequest({ urls: ['https://github.com/*/releases/download/*'] }, handler)
+
+      // 改道之后失败 → 认定是镜像的问题，攒够次数就摘掉拦截
+      autoUpdater.on('error', () => {
+        // 没改道过就失败，那是 GitHub 自己或本机网络的问题，不该算到镜像头上
+        if (this.mirrorRedirects === 0) return
+        this.mirrorFailures++
+        if (shouldUseMirror(this.mirrorFailures)) return
+        try {
+          session.webRequest.onBeforeRequest(null)
+        } catch {
+          // 摘不掉也只是继续走镜像，不值得炸
+        }
+      })
+    } catch {
+      // 静默退回直连：这里没有日志基建，为一条「能更快」的路抛错不值得
+    }
   }
 
   /** 事件名 → UpdateEvent。这一层就是全部「翻译」成本 */

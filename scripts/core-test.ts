@@ -80,7 +80,10 @@ import {
   friendlyError,
   initialUpdateState,
   isPortable,
+  mirrorReleaseUrl,
+  RELEASE_MIRROR,
   sameUpdateState,
+  shouldUseMirror,
   updateReducer,
   updateSummary,
   updateUnsupportedReason
@@ -2949,6 +2952,33 @@ console.log('\n--- 自动更新的状态机 ---')
     'something odd'
   )
   check('空错误也有兜底', friendlyError(new Error('')), '未知原因')
+
+  /**
+   * 安装包下载改道到国内镜像（2026-11-06）。
+   *
+   * 起因是实测「正在下载 14%」卡了 45 分钟：GitHub release 资源直连只有
+   * 25–30 KB/s。改道只准发生在**安装包**那一跳，所以这几条断言钉的是
+   * 「什么该改、什么绝不能改」—— 尤其镜像站对 `releases.atom` 回 403，
+   * 把发现请求一起改道会让检查更新整个坏掉。
+   */
+  const rel = 'https://github.com/FightZhanAng/todo-reminder/releases/download/v0.1.11/todo-reminder-0.1.11-setup.exe'
+  check('release 资源改道到镜像', mirrorReleaseUrl(rel), `${RELEASE_MIRROR}${rel}`)
+  check('默认镜像是 https 开头且带结尾斜杠', /^https:\/\/.+\/$/.test(RELEASE_MIRROR), true)
+  check('可以换成别的镜像', mirrorReleaseUrl(rel, 'https://example.com/'), `https://example.com/${rel}`)
+  // 镜像 URL 本身就是「镜像前缀 + github URL」的形状，用 includes 判会再套一层
+  check('已是镜像 URL 不再套第二层（防前缀套娃）', mirrorReleaseUrl(mirrorReleaseUrl(rel)), mirrorReleaseUrl(rel))
+  check('latest.yml 不改道（清单必须来自 GitHub）', mirrorReleaseUrl('https://github.com/a/b/releases/download/v1/latest.yml'), 'https://github.com/a/b/releases/download/v1/latest.yml')
+  check('blockmap 不改道（差分块表也属于清单侧）', mirrorReleaseUrl('https://github.com/a/b/releases/download/v2/x.exe.blockmap'), 'https://github.com/a/b/releases/download/v2/x.exe.blockmap')
+  check('releases.atom 不改道（镜像会回 403）', mirrorReleaseUrl('https://github.com/a/b/releases.atom'), 'https://github.com/a/b/releases.atom')
+  check('api.github.com 不改道', mirrorReleaseUrl('https://api.github.com/repos/a/b/releases'), 'https://api.github.com/repos/a/b/releases')
+  check('http 明文不改道', mirrorReleaseUrl('http://github.com/a/b/releases/download/v1/x.exe'), 'http://github.com/a/b/releases/download/v1/x.exe')
+  check('镜像自己的域名不被当 github 处理', mirrorReleaseUrl('https://ghfast.top/https://github.com/a/b/releases/download/v1/x.exe'), 'https://ghfast.top/https://github.com/a/b/releases/download/v1/x.exe')
+  check('路径里带 releases/download 的别处不改道', mirrorReleaseUrl('https://evil.example/x/releases/download/y'), 'https://evil.example/x/releases/download/y')
+  // 镜像是第三方公益站：它挂了不能让自动更新跟着挂，攒够失败就退回直连
+  check('没失败过照走镜像', shouldUseMirror(0), true)
+  check('失败一次还给一次机会（差分有多个 Range 请求，一次抖动不算挂）', shouldUseMirror(1), true)
+  check('连续两次失败退回直连', shouldUseMirror(2), false)
+  check('更多失败仍然不走镜像', shouldUseMirror(9), false)
 
   // 界面文案
   check(

@@ -210,6 +210,62 @@ export function friendlyError(err: unknown): string {
 }
 
 /**
+ * 安装包下载改道用的国内镜像前缀（实测 2026-11-06：直连 GitHub release
+ * 资源只有 25–30 KB/s，同一台机器走这个镜像单路 409 KB/s、四路 2.19 MB/s）。
+ *
+ * 这类镜像是社区公益站，**随时可能停**，所以它只能当加速尝试、不能当唯一通路
+ * —— 这也是下面 `mirrorReleaseUrl` 只认安装包、且 main 那边挂不上就
+ * 原样走 GitHub 的原因。
+ */
+export const RELEASE_MIRROR = 'https://ghfast.top/'
+
+/**
+ * 安装包本身的 URL 形状：GitHub release 下、以安装产物扩展名结尾的那一个。
+ *
+ * 两处都是刻意的窄：
+ * - 必须匹配**完整路径**，不能用 `includes('/releases/download/')` —— 镜像站的
+ *   URL 形状就是 `https://ghfast.top/https://github.com/...`，用 includes 会把
+ *   已经改道过的 URL 再套一层，变成前缀套娃。
+ * - 只认安装产物扩展名，**不认 `.yml` / `.atom` / `.blockmap`**：版本清单必须
+ *   继续来自 GitHub，这样 sha512 是官方那份，改道不降低完整性保证。
+ */
+const GITHUB_INSTALLER_URL = /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\/[^/]+\/[^/]+\.(exe|zip|dmg)$/i
+
+/**
+ * 把 GitHub 安装包的下载 URL 换成走镜像的等价 URL。不是那个形状就原样返回。
+ *
+ * **只管安装包，别扩到 latest.yml / releases.atom**：这类镜像对
+ * `releases.atom` 直接回 403（实测），把发现请求一起改道会让「检查更新」整个坏掉
+ * —— 而那比慢 45 分钟严重得多。安装包的 sha512 由 GitHub 上的 latest.yml 校验，
+ * 装完还会由 electron-updater 复核，所以这一跳换源不降低完整性保证。
+ *
+ * `https://` 是硬条件：明文 http 的包会被镜像当路径处理，改道过去是个 404。
+ */
+export function mirrorReleaseUrl(url: string, mirror: string = RELEASE_MIRROR): string {
+  return GITHUB_INSTALLER_URL.test(url) ? `${mirror}${url}` : url
+}
+
+/**
+ * 连续失败几次就放弃镜像。
+ *
+ * 取 2 而不是 1：差分下载会发**多个** Range 请求，一次抖动就记一笔，
+ * 一次就撤会让「时好时坏」的镜像完全用不上。也不取更大 —— 镜像真停时
+ * 每个请求都要先撞穿一次超时才轮到直连，用户等到的是两倍时长。
+ */
+const MIRROR_GIVE_UP_AFTER = 2
+
+/**
+ * 本次进程还要不要把安装包改道到镜像。
+ *
+ * 存在的理由只有一个：镜像是第三方公益站，**它挂了不能让自动更新跟着挂**。
+ * main 那边数失败次数，到阈值就退回慢但能用的直连。只在本次进程内生效 ——
+ * 下次启动重新给镜像一次机会，不必把「今天挂了」写进磁盘永久生效。
+ */
+export function shouldUseMirror(failures: number): boolean {
+  return failures < MIRROR_GIVE_UP_AFTER
+}
+
+/**
  * 状态 → 一句话。界面只调它，别在 JSX 里现写 if 链 ——
  * 那样每加一个状态就得到处补一处，漏掉的那个分支会静默显示成空白。
  */
