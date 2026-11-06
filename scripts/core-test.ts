@@ -3005,12 +3005,12 @@ console.log('\n--- renderer/tokens.css 的对比度与用色规矩 ---')
 
   check('深色段真的解析到了（不是空对象）', Object.keys(dark).length > 0, true)
 
-  // 三层纸：窗口底 --paper（顶栏与底栏就坐在它上面）、列表纸面 --sheet、
-  // 控件面 --surface（浮层）。**每个当文字用的色都要在三层上都达标** ——
-  // 只验一层会漏掉「同一个色在顶栏够、在纸面上不够」这类问题，
-  // 而朱砂恰好就是这么漏的：--paper 上 4.46:1，--sheet 上 5.08:1。
-  const PAPERS = ['paper', 'sheet', 'surface']
-  const TEXT_HUES = ['ink', 'ink-muted', 'indigo', 'cinnabar']
+  // 三层纸：窗口底 --bg（顶栏与底栏就坐在它上面）、纸面 --surface、
+  // 暖纸 --surface-warm（行 hover / 提示条 / 表单块）。**每个当文字用的色都要在三层上都达标** ——
+  // 只验一层会漏掉「同一个色在顶栏够、在暖纸上不够」这类问题，
+  // 而新令牌里的 --muted 恰好就是这么漏的：原型给的 #64748d 在 --surface-warm 上只有 4.49:1。
+  const PAPERS = ['bg', 'surface', 'surface-warm']
+  const TEXT_HUES = ['fg', 'fg-2', 'muted', 'accent', 'danger']
 
   for (const [themeName, t] of [['浅色', light], ['深色', dark]] as const) {
     for (const fg of TEXT_HUES) {
@@ -3028,9 +3028,7 @@ console.log('\n--- renderer/tokens.css 的对比度与用色规矩 ---')
 
   // --ink-faint 只准给图标字形用。逐个列出允许的落点：加一处就得在这里加一行，
   // 于是「顺手拿它给一段文案调淡」会在测试里被挡住
-  // （顺序 = styles.css 里的出现顺序，标题带那三个字形画在最前面。
-  //   原表里还有 `.head__sep` —— 表头那句「· 还剩 4 件」换成读数带之后，
-  //   分隔线由 border-left 画，那枚 `·` 连同它的落点一起撤了）
+  // （顺序 = styles.css 里的出现顺序，标题带那三个字形画在最前面）
   const GLYPH_SELECTORS = [
     '.titlebar__button',
     '.row__more',
@@ -3076,8 +3074,9 @@ console.log('\n--- renderer/tokens.css 的对比度与用色规矩 ---')
   }
   // [字色, 底, 字在这层底上的实际不透明度]
   const SOLID_PAIRS: Array<[string, string, number]> = [
-    ['on-indigo', 'indigo', 1],
+    ['on-accent', 'accent', 1],
     ['on-slab', 'slab', 0.75],
+    ['on-danger', 'danger', 1]
   ]
   for (const [themeName, t] of [['浅色', light], ['深色', dark]] as const) {
     for (const [fg, bg, alpha] of SOLID_PAIRS) {

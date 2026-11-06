@@ -4,14 +4,21 @@
  *
  * ## 怎么跑
  *
- *   在 Bash 工具里跑（它会阻塞到进程退出）：
- *     unset ELECTRON_RUN_AS_NODE
+ *   推荐用通用启动器（它会先删掉 `ELECTRON_RUN_AS_NODE`，见 scripts/run-electron.cjs）：
+ *     node scripts/run-electron.cjs .workbuddy/tools/shot.cjs
+ *     node scripts/run-electron.cjs .workbuddy/tools/shot.cjs --dark
+ *
+ *   直接调 electron.exe 也行，但**先确认那个变量不存在**：
+ *     Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
  *     ./node_modules/electron/dist/electron.exe .workbuddy/tools/shot.cjs
  *     ./node_modules/electron/dist/electron.exe .workbuddy/tools/shot.cjs --dark
  *
- *   三条实测限制，踩过就别再踩：
- *   1. **`ELECTRON_RUN_AS_NODE` 必须清掉** —— 否则 `electron.exe <script>` 会以 Node 模式
- *      跑它，`require('electron')` 返回的是路径字符串而不是 API，0.5s 秒退且无任何输出。
+ *   四条实测限制，踩过就别再踩：
+ *   1. **`ELECTRON_RUN_AS_NODE` 必须不存在**（不是置空、不是置 '0'）——
+ *      否则 `electron.exe <script>` 会以 Node 模式跑它，`require('electron')` 返回
+ *      路径字符串而不是 API，`ipcMain` 是 undefined，0.5s 秒退且无任何输出。
+ *      置空串会直接崩（exit 134，Node 断言失败），置 '0' 仍然进 Node 模式。
+ *      这也是为什么推荐走 run-electron.cjs —— 它在 spawn 之前就把变量删干净了。
  *   2. **PowerShell 的 `&` 不等它**（实测 0.04s 就返回，进程在后台照跑），紧跟其后的
  *      读图命令只会看到上一轮的旧图 —— 症状是「时间戳没变」，极易误判成探针坏了。
  *      要在 PowerShell 里跑就用 `Start-Process -FilePath <exe> -ArgumentList <script>
@@ -166,6 +173,13 @@ app.whenReady().then(async () => {
   await win.loadFile(join(ROOT, 'out', 'renderer', 'index.html'))
   win.webContents.send('todo:snapshot', snapshot)
   await sleep(800)
+
+  // 窗口开在屏幕外时 Chromium 认为它被遮挡，**rAF 不推进** —— 于是 CSS 入场动画
+  // 停在第一帧（截图里整个表头是半透明的、行还没出现），而且这一帧只有
+  // capturePage 自己触发的那一次合成。先空拍一张把动画时钟推起来、丢掉它，
+  // 再等一拍让动画走完，之后每一张才是稳态画面。
+  await win.webContents.capturePage()
+  await sleep(600)
 
   // 看板是默认视图，进来就是它 —— 顶栏大号日期、四段分段标签、竖轴刻度都在这一屏。
   // 它排在第一个拍：后面几步会翻页 / 跳视图，回不来才是常态

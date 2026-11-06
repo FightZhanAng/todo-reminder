@@ -210,7 +210,7 @@ function Head({
 
   return (
     <header className="head">
-      <div className="head__main">
+      <div className="head__top">
         <h1 className="dateline">
           <span className="dateline__month">{CN_MONTHS[d.getMonth()]}</span>
           <span className="dateline__day">{d.getDate()}</span>

@@ -1,32 +1,31 @@
 /*
- * 尺规 —— 视觉说明
+ * 尺规 · Stripe 令牌版 —— 视觉说明
  *
  * 这件工具回答的是一个可数的问题：**今天还剩几件、哪几件已经越线了**。
  * 所以界面按仪表的规矩组织，主角是三样东西：
  *
  *   1. 左边一根**带分格的量尺**。
- *      每 4px 一道小刻（--graduation）是尺的底面，匀、淡、不说话；
+ *      小格每 5px 一道、长 3px（--graduation，纹理级）；
+ *      主格每 20px 一道、长 8px（走 --rule-strong，读起来是「轴在分格」）。
  *      每一行自己那一道才是**读数**，长度编码紧迫度：
- *        7px 细灰  = 不急
- *        13px 靛蓝加粗 = 一小时内
- *        24px 朱砂、并且**越过轴向左伸出去 7px** = 逾期
- *      最后这一笔是整张界面的签名 —— 像一根冲过限位刻度的针。竖向扫一眼，
- *      就知道今天有几件事已经越线。它和日历格子上那道朱砂竖条是同一套语言。
+ *        8px 细灰        = 不急
+ *        12px 强调色加粗 = 一小时内
+ *        20px 洋红、并且**越过轴向左伸出去 4px** = 逾期
+ *      最后这一笔是整张界面的签名 —— 像一根冲过限位刻度的针。
  *
- *   2. 表头一块**读数带**（.readout）。
- *      铭牌标签（现在 / 还剩 / 逾期）+ 等宽读数，三格靠发丝线分格。
- *      原来的写法是一句「20:53 · 还剩 4 件 逾期 3」—— 读得出，但读不快，
- *      而且那三个数混在一行小字里，一眼扫不到哪个是自己该在意的。
+ *   2. 表头一块**读数带**（.readout）。铭牌标签（现在 / 还剩 / 逾期）+
+ *      等宽读数，三格靠发丝线分格，固定三轨的 grid。
  *
  *   3. 一行**大号等宽日期**。数字一律等宽（--font-mono + tabular-nums），
  *      1 和 8 一样宽，一列时刻才能对齐成一条线。
  *
- * 其余一切（分段标签、表单、按钮）刻意安静：发丝线、2px 直角、无阴影。
- * 全界面只有**两处实心墨块** —— 底栏上方那个「记一件」和表单的提交钮。别加第三个。
+ * 其余一切刻意安静：发丝线、小圆角、无阴影（阴影只给浮层）。
+ * 全界面只有**两处大块实底** —— 底栏上方那个「+ 记一件」和表单的「记下」。
+ * 倒计时那块大盘走另一对 --slab / --on-slab：强调色是说「按我」的，
+ * 读数不该借它。
  *
- * 已经撤掉的东西（别再搬回来）：宋体（做数字在高分屏上偏单薄，中文标题改用
- * 雅黑 + 大字距，更像仪表盘上的丝印铭牌）、琥珀色「快到了」（和朱砂是同一个
- * 语义量级，两个色相说同一件事只会互相稀释）。
+ * 这一版换的是材质（Stripe 的白纸 + 深海军墨 + 紫罗兰），结构和语义一条没动。
+ * 已经撤掉的东西（别再搬回来）：宋体、琥珀色「快到了」、靛蓝/朱砂那一对。
  */
 
 *,
@@ -43,11 +42,12 @@ body,
 }
 
 body {
-  font-family: var(--font-ui);
-  font-size: var(--fs-body);
-  line-height: 1.5;
-  color: var(--ink);
-  background: var(--paper);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: var(--leading-body);
+  color: var(--fg);
+  background: var(--bg);
   /* 常驻小工具：默认不让选文本，输入框自己开回来 */
   -webkit-user-select: none;
   user-select: none;
@@ -70,11 +70,11 @@ textarea {
   -webkit-user-select: text;
   user-select: text;
   background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
   width: 100%;
-  transition: border-color var(--dur-fast) ease;
+  transition: border-color var(--motion-fast) var(--ease-standard);
 }
 
 input:not([type='checkbox']):not([type='radio']):hover,
@@ -88,7 +88,7 @@ input:focus-visible,
 textarea:focus-visible,
 button:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--indigo);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -109,7 +109,8 @@ ul {
 
 /* dl/dd 的浏览器默认外边距会把读数带撑歪 */
 dl,
-dd {
+dd,
+dt {
   margin: 0;
 }
 
@@ -123,13 +124,12 @@ dd {
  * 定位到那一行里而不是视口上。opacity 只产生层叠上下文，不动包含块，安全。
  * 其余几组（表头 / 分段标签 / 入口 / 底栏）里面没有 fixed 元素，才配得上位移。
  *
- * prefers-reduced-motion 由文件开头那条全局规则掐掉（animation-duration 归零），
- * 所以这里不用再写一遍。
+ * prefers-reduced-motion 由下面那条全局规则统一掐掉，不在每个 keyframes 旁边再写。
  */
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(5px);
+    transform: translateY(var(--space-1));
   }
   to {
     opacity: 1;
@@ -146,12 +146,24 @@ dd {
   }
 }
 
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--space-1) * -1));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
     transition-duration: 0.001ms !important;
   }
 }
@@ -159,10 +171,11 @@ dd {
 /* ---- 外壳：四段（标题带 / 顶栏 / 列表纸面 / 底栏） ---- */
 
 .app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--paper);
+  background: var(--bg);
 }
 
 .app__body,
@@ -171,8 +184,7 @@ dd {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  /* 列表是「铺在台面上的一张纸」，比窗口底色亮一档 */
-  background: var(--sheet);
+  background: var(--bg);
   scrollbar-width: thin;
   scrollbar-color: var(--rule-strong) transparent;
 }
@@ -192,19 +204,19 @@ dd {
   display: flex;
   align-items: stretch;
   justify-content: space-between;
-  height: 32px;
-  padding-left: 12px;
+  height: var(--titlebar-h);
+  padding-left: var(--space-3);
   /* 整条是拖动区。里面的东西一律要 no-drag，否则鼠标根本到不了渲染层 */
   -webkit-app-region: drag;
-  background: var(--paper);
+  background: var(--bg);
 }
 
 .titlebar__name {
   display: flex;
   align-items: center;
-  font-size: var(--fs-small);
-  letter-spacing: 0.12em;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-title);
+  color: var(--muted);
 }
 
 .titlebar__actions {
@@ -218,16 +230,18 @@ dd {
   align-items: center;
   justify-content: center;
   width: 42px;
-  /* 图标字形，所以是第三级灰 —— 见 AGENTS.md 第 3 条（这条有测试钉着落点） */
+  /* 图标字形，所以是图元那一档灰 —— 见 AGENTS.md 第 3 条（有测试钉着落点） */
   color: var(--ink-faint);
   transition:
-    color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease;
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
+/* 关闭按钮的 hover 用强调色不用洋红：洋红只说「已经晚了」和「删除」，
+   关掉一个常驻托盘应用的窗两样都不是 */
 .titlebar__button:hover {
-  color: var(--ink);
-  background: var(--hover);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* 三个字形全画在 currentColor 上，所以 hover 只换个字色就够了 */
@@ -247,7 +261,7 @@ dd {
   width: 9px;
   height: 9px;
   border: 1px solid currentColor;
-  border-radius: 1px;
+  border-radius: var(--radius-sm);
 }
 
 /* 「还原」= 前方那个框 + 右上露出的一截后框。后框只画两条边：
@@ -287,82 +301,81 @@ dd {
   transform: rotate(-45deg);
 }
 
-/* ---- 表头：大号等宽日期 + 一块读数带 ---- */
+/* ---- 表头：日期铭牌 + 分段控件 + 读数带 ---- */
 
 .head {
   flex: none;
-  padding: 10px 12px 0;
-  border-bottom: 1px solid var(--rule);
-  animation: rise var(--dur-scene) var(--ease-out) both;
+  padding: var(--space-2) var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+  animation: rise var(--motion-base) var(--ease-standard) both;
 }
 
-.head__main {
+.head__top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-}
-
-/*
- * 顶栏右侧那一组：四枚图标装进**一条分段控件**，靠 1px 发丝线分开，
- * 而不是四个飘在空中的图标 —— 后者是这张界面上最像「随便一个 app」的地方。
- * 底色抬到 --surface（比窗口纸亮一档），读起来是一块装上去的面板。
- */
-.head__actions {
-  flex: none;
-  display: flex;
-  align-items: stretch;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--surface);
-}
-
-.head__actions > .iconbutton {
-  width: 30px;
-  height: 30px;
-  border-radius: 0;
-}
-
-.head__actions > .iconbutton + .iconbutton {
-  border-left: 1px solid var(--rule);
-}
-
-/* 自绘图标：currentColor 描边，所以 hover 与深浅主题都自动跟上 */
-.glyph {
-  display: block;
+  gap: var(--space-3);
 }
 
 .dateline {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: var(--space-2);
   margin: 0;
   min-width: 0;
 }
 
 /* 「九月」是一枚铭牌：小、宽字距、灰 —— 它给旁边那个大数字当单位说明 */
 .dateline__month {
-  font-size: var(--fs-small);
-  letter-spacing: 0.24em;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-plate);
+  color: var(--muted);
 }
 
-/* 整张界面最大的一个字。等宽 + 加粗 = 仪表上的读数，不是排版的标题 */
+/* 整张界面最大的一个字。等宽 + 细字重 + 负字距 = 仪表上的读数，不是排版的标题 */
 .dateline__day {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-readout);
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  color: var(--ink);
+  font-size: var(--text-2xl);
+  font-weight: 300;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg);
 }
 
 .dateline__dow {
-  font-size: var(--fs-small);
-  letter-spacing: 0.1em;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-quiet);
+  color: var(--fg-2);
+}
+
+/*
+ * 顶栏右侧那一组：四枚图标装进**一条分段控件**，靠 1px 发丝线分开，
+ * 而不是四个飘在空中的图标 —— 后者是这张界面上最像「随便一个 app」的地方。
+ */
+.head__actions {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.head__actions > .iconbutton {
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: 0;
+}
+
+.head__actions > .iconbutton + .iconbutton {
+  border-left: 1px solid var(--border);
+}
+
+/* 自绘图标：currentColor 描边，所以 hover 与深浅主题都自动跟上 */
+.glyph {
+  display: block;
 }
 
 /*
@@ -375,45 +388,45 @@ dd {
 .readout {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  margin-top: 9px;
-  border-top: 1px solid var(--rule);
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--border);
 }
 
 .readout__cell {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: var(--space-2);
   min-width: 0;
-  padding: 7px 0 8px;
+  padding: var(--space-2) 0;
 }
 
 .readout__cell + .readout__cell {
-  padding-left: 12px;
-  border-left: 1px solid var(--rule);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border);
 }
 
 /* 铭牌标签：小、宽字距、灰。它自己不该被读到，它只回答「这个数是哪个数」 */
 .readout__label {
-  font-size: var(--fs-tiny);
-  letter-spacing: 0.18em;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-plate);
+  color: var(--muted);
 }
 
 .readout__value {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: 300;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg);
 }
 
-/* 逾期那一格整格转朱砂：标签和读数一起 —— 只说数字染红的话，
+/* 逾期那一格整格转洋红：标签和读数一起 —— 只说数字染红的话，
    「逾期」两个字还是灰的，扫一眼会以为那是「还剩」 */
 .head__late .readout__label,
 .head__late .readout__value {
-  color: var(--cinnabar);
+  color: var(--danger);
 }
 
 .iconbutton {
@@ -421,36 +434,36 @@ dd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius);
-  font-size: 15px;
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   line-height: 1;
-  color: var(--ink-muted);
+  color: var(--fg-2);
   transition:
-    background-color var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .iconbutton:hover {
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
-/* 全界面上只有两处实心墨块，这是其中之一（另一处在表单的提交钮上） */
+/* 小的实底按钮：加一个纪念日那颗「+」。面积只有 32px，不是「墨块」，
+   所以借强调色（它确实在说「按我」） */
 .iconbutton--solid {
-  background: var(--ink);
-  color: var(--sheet);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .iconbutton--solid:hover {
-  background: var(--indigo);
-  color: var(--sheet);
+  background: var(--accent-hover);
+  color: var(--on-accent);
 }
 
 /* 换个主题是一次整屏的底色变化。给它 150ms，免得像闪了一下；
-   单个元素的过渡不加 —— 那样整个界面会「糊」成一片，反而不干净。
-   prefers-reduced-motion 时由文件开头那条全局规则掐掉。 */
+   单个元素的过渡不加 —— 那样整个界面会「糊」成一片，反而不干净。 */
 body,
 .app,
 .app__body,
@@ -460,9 +473,9 @@ body,
 .topbar,
 .bottombar {
   transition:
-    background-color 150ms ease,
-    border-color 150ms ease,
-    color 150ms ease;
+    background-color 150ms var(--ease-standard),
+    border-color 150ms var(--ease-standard),
+    color 150ms var(--ease-standard);
 }
 
 /* ---- 覆盖式视图（编辑器 / 设置 / 收件箱）的顶栏 ---- */
@@ -472,101 +485,102 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px 9px;
-  border-bottom: 1px solid var(--rule);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
 }
 
 .topbar__lead {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
-/* 页面标题是一块**丝印铭牌**：雅黑加粗 + 大字距。宋体退场了 ——
+/* 页面标题是一块**丝印铭牌**：细字重 + 大字距。宋体退场了 ——
    它做小字号会露点阵感，做标题又和这台仪表的读数气质不合 */
 .topbar__title {
   margin: 0;
-  font-size: var(--fs-title);
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  font-size: var(--text-lg);
+  font-weight: 300;
+  letter-spacing: var(--tracking-title);
+  color: var(--fg);
 }
 
 .topbar__date {
-  margin-left: 2px;
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  margin-left: var(--space-2);
+  font-size: var(--text-xs);
+  letter-spacing: 0;
+  color: var(--muted);
 }
 
 .topbar__actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .topbar__button {
-  padding: 4px 12px;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
-  font-size: var(--fs-body);
-  color: var(--ink-muted);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
   transition:
-    border-color var(--dur-fast) ease,
-    color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease;
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
 .topbar__button:hover {
-  border-color: var(--indigo);
-  color: var(--indigo);
-  background: var(--indigo-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
-/* 另一个实心墨块：提交 */
+/* 大块实底之一：表单的提交钮 */
 .topbar__button--primary {
-  border-color: transparent;
-  background: var(--ink);
-  color: var(--sheet);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  letter-spacing: var(--tracking-button);
 }
 
 .topbar__button--primary:hover {
-  border-color: transparent;
-  background: var(--indigo);
-  color: var(--sheet);
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+  color: var(--on-accent);
 }
 
 /* ---- 量与尺：分段标签 + 行 ----
  *
  * 横向几何以 tokens.css 的 --w-cursor / --w-clock / --w-tick / --ruler-x
- * 为准（游标 3 → 时刻列 52 → 刻度列 17，轴落在 55）。这里不写死数字：
- * 段标签的左内边距用 --label-pad（= 轴 + 粗刻度 9 + 气口 8），
- * 两个伪元素的 left 用 --ruler-x。改一处就全跟着走。
+ * 为准（游标 4 → 时刻列 48 → 刻度列 16，轴落在 52）。这里不写死数字：
+ * 段标签的左内边距用 --label-pad（= 轴 + 粗刻度 8 + 气口 8），
+ * 伪元素的 left 用 --ruler-x。改一处就全跟着走。
  *
  * 竖轴要是一根**通到底**的线：每一行（含没有时刻的那几段）都必须渲染
  * .row__clock —— 少了它，那一段的轴会整体左移，一根轴断成两截。
  * scripts/smoke.cjs 里「竖轴逐行对齐」守的就是这条。
  */
 
-/* 段与段之间一道**大分格线**横贯整行 —— 尺上的主刻度就是这样的：
-   它不只切在轴上，它把整张纸切开。第一段不要（上面 .head 已经有一道了） */
-.section + .section {
-  border-top: 1px solid var(--rule);
-}
-
 .section {
-  padding-bottom: 2px;
+  padding-bottom: var(--space-1);
 }
 
 .section__label {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin: 0;
-  padding: 11px 12px 6px var(--label-pad);
-  font-size: var(--fs-tiny);
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  color: var(--ink-muted);
-  animation: rise var(--dur-base) var(--ease-out) both;
+  padding: var(--space-3) var(--space-3) var(--space-1) var(--label-pad);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-plate);
+  color: var(--muted);
+  animation: rise var(--motion-base) var(--ease-standard) both;
 }
 
 /* 段标签也要把竖轴续上，否则轴会在每个分段标题处断开 */
@@ -577,36 +591,39 @@ body,
   top: 0;
   bottom: 0;
   width: 1px;
-  background: var(--rule);
+  background: var(--border);
 }
 
-/* 分段处的粗刻度：轴上的大分格，比行里那道读数更长、更肯定 */
+/* 分段处一道**横贯整行**的大分格线 —— 尺上的主刻度就是这样的：
+   它不只切在轴上，它把整张纸切开。这条线从轴的位置开始，所以读起来是
+   「轴在分格」，而不是又一条与轴无关的装饰线 */
 .section__label::after {
   content: '';
-  position: absolute;
-  left: var(--ruler-x);
-  top: 50%;
-  width: 11px;
+  flex: 1;
   height: 1px;
-  background: var(--rule-strong);
+  margin-left: var(--space-2);
+  background: var(--border);
 }
 
-/* 逾期那一段的铭牌与分格都转朱砂 —— 它说的是同一件事 */
-.section--overdue .section__label {
-  color: var(--cinnabar);
-}
-
-.section--overdue .section__label::after {
-  background: var(--cinnabar);
+.section__name {
+  flex: none;
 }
 
 .section__count {
-  margin-left: 7px;
+  flex: none;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-tiny);
-  font-weight: 700;
   letter-spacing: 0;
+  color: var(--fg-2);
+}
+
+/* 逾期那一段的铭牌与分格都转洋红 —— 它说的是同一件事 */
+.section--overdue .section__label {
+  color: var(--danger);
+}
+
+.section--overdue .section__label::after {
+  background: var(--danger-soft);
 }
 
 /*
@@ -617,10 +634,10 @@ body,
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 34px;
-  padding-right: 10px;
-  transition: background-color var(--dur-fast) ease;
-  animation: fade-in var(--dur-base) var(--ease-out) both;
+  min-height: var(--space-8);
+  padding-right: var(--space-3);
+  animation: fade-in var(--motion-base) var(--ease-standard) both;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 /* 组内错峰：四行以内的按 45ms 递进，第五行之后不再往后拖
@@ -652,14 +669,14 @@ body,
 }
 
 .row:hover {
-  background: var(--hover);
+  background: var(--surface-warm);
 }
 
 .row--cursor {
-  background: var(--cursor-bg);
+  background: var(--accent-wash);
 }
 
-/* 键盘游标：行最左侧 3px 竖线 */
+/* 键盘游标：行最左侧一条强调色竖线 */
 .row__cursor {
   flex: none;
   width: var(--w-cursor);
@@ -668,33 +685,33 @@ body,
 }
 
 .row--cursor .row__cursor {
-  background: var(--indigo);
+  background: var(--accent);
 }
 
 .row__clock {
   flex: none;
   width: var(--w-clock);
-  padding-left: 9px;
+  padding-left: var(--space-2);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-cell);
-  letter-spacing: -0.02em;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-display);
+  color: var(--muted);
   white-space: nowrap;
 }
 
 .row__clock[data-urgency='soon'] {
-  color: var(--indigo);
+  color: var(--accent);
 }
 
 .row__clock[data-urgency='overdue'] {
-  color: var(--cinnabar);
+  color: var(--danger);
 }
 
 /*
  * 刻度列 —— 尺本身。
  *
- * 四层叠在一起，从下到上：
+ * 三层叠在一起，从下到上：
  *   小格  background 第 2 层   每 5px 一道、长 3px（尺的底面，纹理级）
  *   主格  background 第 1 层   每 20px 一道、长 8px（跟轴同色，读起来是轴在分格）
  *   轴    ::before             x=0 那根通到底的竖线
@@ -711,13 +728,13 @@ body,
   background-image:
     repeating-linear-gradient(
       to bottom,
-      var(--rule) 0 1px,
-      transparent 1px var(--grad-major-pitch)
+      var(--border) 0 var(--grad-major-len),
+      transparent var(--grad-major-len) var(--grad-major-pitch)
     ),
     repeating-linear-gradient(
       to bottom,
-      var(--graduation) 0 1px,
-      transparent 1px var(--grad-pitch)
+      var(--graduation) 0 var(--grad-len),
+      transparent var(--grad-len) var(--grad-pitch)
     );
   background-size:
     var(--grad-major-len) 100%,
@@ -732,81 +749,80 @@ body,
   top: 0;
   bottom: 0;
   width: 1px;
-  background: var(--rule);
+  background: var(--border);
 }
 
-/* 刻度本体。三档长度：7 / 13 / 24px */
+/* 刻度本体。三档长度：8 / 12 / 20px */
 .row__tick::after {
   content: '';
   position: absolute;
+  left: 0;
   top: 50%;
-  left: var(--tick-x, 0);
-  width: var(--tick-w, 7px);
-  height: var(--tick-h, 1.5px);
-  background: var(--tick-c, var(--tick-none));
+  width: var(--tick-idle);
+  height: 1px;
+  background: var(--graduation);
   transform: translateY(-50%);
 }
 
-.row__tick[data-urgency='soon'] {
-  --tick-x: 0px;
-  --tick-w: 13px;
-  --tick-h: 2px;
-  --tick-c: var(--indigo);
+.row__tick[data-urgency='soon']::after {
+  width: var(--tick-soon);
+  height: var(--hair);
+  background: var(--accent);
 }
 
-/* 逾期：越过轴向左伸出去 7px，像一根冲过限位刻度的针 */
-.row__tick[data-urgency='overdue'] {
-  --tick-x: -7px;
-  --tick-w: 24px;
-  --tick-h: 2.5px;
-  --tick-c: var(--cinnabar);
+/* 逾期：越过轴向左伸出去 4px，像一根冲过限位刻度的针 */
+.row__tick[data-urgency='overdue']::after {
+  left: calc(var(--space-1) * -1);
+  width: var(--tick-over);
+  height: var(--hair);
+  background: var(--danger);
 }
 
-/* 勾选框是**方的**：仪器上不打勾的格子不做成圆的。
-   圆角只留 2px，和全界面的直角一致 */
+/* 勾选框是**方的**：仪器上不打勾的格子不做成圆的 */
 .row__dot {
   flex: none;
-  width: 15px;
-  height: 15px;
-  margin: 0 9px;
-  border: 1.5px solid var(--rule-strong);
-  border-radius: 2px;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin: 0 var(--space-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   transition:
-    border-color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease;
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
 .row__dot:hover {
-  border-color: var(--indigo);
-  background: var(--indigo-soft);
+  border-color: var(--accent);
 }
 
 /* 已完成的勾：填实心底、里面一枚纸色的勾。
-   勾用两条 border 拼（不引 SVG）：一个 4.5×8 的盒子只留右边和下边，
-   转 43° 就是那个对勾，角的圆润度由 border-radius 的 2px 给。 */
+   勾用两条 border 拼（不引 SVG）：一个 4×8 的盒子只留右边和下边，
+   转 40° 就是那个对勾 */
 .row__dot--on {
   position: relative;
-  border-color: var(--indigo);
-  background: var(--indigo);
+  border-color: var(--accent);
+  background: var(--accent);
 }
 
 .row__dot--on::after {
   content: '';
   position: absolute;
-  left: 3.5px;
-  top: 1.5px;
-  width: 4.5px;
-  height: 8px;
-  border: solid var(--surface);
-  border-width: 0 1.8px 1.8px 0;
-  border-radius: 0 0 2px 0;
+  left: var(--space-1);
+  top: calc(var(--hair) * 2);
+  width: var(--space-1);
+  height: calc(var(--space-1) * 2);
+  border: solid var(--on-accent);
+  border-width: 0 var(--hair) var(--hair) 0;
+  border-radius: 0 0 var(--radius-sm) 0;
   box-sizing: border-box;
+  transform: rotate(40deg);
 }
 
 .row__dot--on:hover {
-  border-color: var(--indigo);
-  background: var(--indigo);
-  /* 空心勾 hover 时是「变成蓝色」，实心勾已经在了，只做一点点提亮 */
+  border-color: var(--accent);
+  background: var(--accent);
+  /* 空心勾 hover 时是「变成强调色」，实心勾已经在了，只做一点点提亮 */
   opacity: 0.82;
 }
 
@@ -823,21 +839,29 @@ body,
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: var(--fs-lead);
+  font-size: var(--text-sm);
+  color: var(--fg);
   cursor: pointer;
 }
 
-/* 「重要」只用字重说，不另加一个色块 —— 界面上每多一个标记，
-   刻度和朱砂的信号就弱一分 */
+/* 「重要」用一个三角和字重说，不另加一个色块 —— 界面上每多一个标记，
+   刻度和洋红的信号就弱一分。三角是字形，不是底 */
 .row--important .row__title {
-  font-weight: 700;
+  font-weight: 400;
+  color: var(--fg);
+}
+
+.row--important .row__title::before {
+  content: '▲ ';
+  font-size: var(--text-xs);
+  color: var(--accent);
 }
 
 /* 已完成清单里的行：标题淡下去，让那笔墨线成为主角。
    注意**不加** .row--exiting / .row--done —— 那是退场动画，
    这里的行是长住的 */
 .row--settled .row__title {
-  color: var(--ink-muted);
+  color: var(--muted);
 }
 
 /* 已经划掉的字不再需要「重要」的字重强调，两者叠加只会更黑 */
@@ -859,11 +883,11 @@ body,
 
 .row__streak {
   flex: none;
-  margin-left: 8px;
+  padding-left: var(--space-2);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--muted);
 }
 
 .row__more {
@@ -871,17 +895,18 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 2px;
-  font-size: 14px;
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   line-height: 1;
+  /* 图标字形，所以是图元那一档灰（有测试钉着落点） */
   color: var(--ink-faint);
   opacity: 0;
   transition:
-    opacity var(--dur-fast) ease,
-    background-color var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    opacity var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .row:hover .row__more,
@@ -896,13 +921,15 @@ body,
 }
 
 .row__more:hover {
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* 退场中的行不接受交互 —— 别让人点到一条正在消失的行 */
 .row--exiting {
   pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--ease-standard);
 }
 
 .row--removed {
@@ -911,17 +938,16 @@ body,
 
 .row__undo {
   flex: none;
-  margin-right: 6px;
-  padding: 2px 8px;
-  border: 1px solid var(--rule-strong);
-  border-radius: 2px;
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--accent);
 }
 
 .row__undo:hover {
-  border-color: var(--indigo);
-  color: var(--indigo);
+  border-color: var(--accent);
 }
 
 /* 已删除行整行被 .row--exiting 设为 pointer-events:none，
@@ -931,43 +957,38 @@ body,
   pointer-events: auto;
 }
 
-/* 完成退场时整行降透明度再移出 */
+/* 完成退场时整行降透明度再移出。**不做位移** —— 理由同入场：
+   带 transform 的祖先会成为 fixed 菜单的包含块 */
 .row--done {
-  animation: row-leave 260ms ease-out 260ms forwards;
-}
-
-@keyframes row-leave {
-  to {
-    opacity: 0.35;
-    transform: translateY(-3px);
-  }
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--ease-standard) 260ms;
 }
 
 /* 从通知点进来时那 2 秒的高亮 */
 .row--highlight {
-  background: var(--indigo-soft);
+  background: var(--accent-soft);
 }
 
 /* 清单池的行没有「完成」这个动作，换成它唯一该做的那个动作 */
 .row__today {
   flex: none;
-  margin: 0 9px;
-  padding: 2px 8px;
+  margin: 0 var(--space-2);
+  padding: 1px var(--space-2);
   border: 1px solid var(--rule-strong);
-  border-radius: 2px;
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--fg-2);
   white-space: nowrap;
   transition:
-    border-color var(--dur-fast) ease,
-    color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease;
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
 .row__today:hover {
-  border-color: var(--indigo);
-  color: var(--indigo);
-  background: var(--indigo-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /*
@@ -990,7 +1011,7 @@ body,
 
 .strike path {
   fill: none;
-  stroke: var(--ink);
+  stroke: var(--fg);
   stroke-opacity: 0.85;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
@@ -1022,52 +1043,58 @@ body,
  * 空的时候界面只剩文字，而文字不该孤零零地漂在一片纸上。
  *
  * 它必须和左边那根量尺同一个节奏（小格 5px / 主格 20px，见 --grad-*），
- * 否则就只是几根竖条 —— 第一版每 7px 一道、每道一样高，在 9px 高的盒子里
- * 拍出来是一排等宽色块，读起来像加载骨架、像条形码，就是不像尺。
- * 两级刻度 + 一条基线才是尺：所有刻度都从基线往上长，长的是主格。
+ * 否则就只是几根竖条。两级刻度 + 一条基线才是尺：所有刻度都从基线往上长。
  */
 .empty {
-  padding: 64px 20px 0;
+  padding: var(--space-12) var(--space-5) 0;
   text-align: center;
-  font-size: var(--fs-sub);
-  letter-spacing: 0.16em;
-  color: var(--ink-muted);
-  animation: rise var(--dur-scene) var(--ease-out) both;
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-title);
+  color: var(--muted);
+  animation: rise var(--motion-scene) var(--ease-standard) both;
 }
 
 .empty::before {
   content: '';
   display: block;
-  width: 80px;
-  height: 9px;
-  margin: 0 auto 22px;
-  /* 主格 9px 高、小格 5px 高，两层都贴着底边（background-position: 100%） */
+  width: var(--space-12);
+  height: var(--space-2);
+  margin: 0 auto var(--space-4);
   background-image:
     repeating-linear-gradient(
       to right,
-      var(--rule-strong) 0 1px,
-      transparent 1px var(--grad-major-pitch)
+      var(--rule-strong) 0 var(--space-2),
+      transparent var(--space-2) var(--grad-major-pitch)
     ),
     repeating-linear-gradient(
       to right,
-      var(--graduation) 0 1px,
-      transparent 1px var(--grad-pitch)
+      var(--graduation) 0 var(--space-1),
+      transparent var(--space-1) var(--grad-pitch)
     );
   background-size:
-    100% 9px,
-    100% 5px;
-  background-position:
-    0 100%,
-    0 100%;
+    100% 100%,
+    100% 100%;
   background-repeat: no-repeat;
   border-bottom: 1px solid var(--rule-strong);
 }
 
 .empty__hint {
-  margin-top: 10px;
-  font-size: var(--fs-small);
-  letter-spacing: 0.08em;
-  color: var(--ink-muted);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-quiet);
+  color: var(--muted);
+}
+
+/* 页中间的空状态：`.empty` 那 48px 的顶部留白是给整屏空的看板用的，
+   这里上面还有节假日那一段，不能那么奢侈。尺子那段也收掉 —— 页中间
+   再来一段装饰会把上面那块实心读数板压住 */
+.empty--tight {
+  padding: var(--space-6) 0;
+  font-size: var(--text-base);
+}
+
+.empty--tight::before {
+  display: none;
 }
 
 /* ---- 顶部提示条 / 一次性提示 ---- */
@@ -1075,18 +1102,19 @@ body,
 .noticebar {
   flex: none;
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--rule);
-  border-left: 3px solid var(--indigo);
-  background: var(--indigo-soft);
-  font-size: var(--fs-body);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  border-left: var(--space-1) solid var(--accent);
+  background: var(--accent-soft);
+  font-size: var(--text-xs);
 }
 
 .noticebar--error {
-  border-left-color: var(--cinnabar);
-  background: var(--cinnabar-soft);
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .noticebar__text {
@@ -1096,57 +1124,59 @@ body,
 
 .noticebar__action {
   flex: none;
-  color: var(--indigo);
+  color: var(--accent);
   text-decoration: underline;
 }
 
 .noticebar--error .noticebar__action {
-  color: var(--cinnabar);
+  color: inherit;
 }
 
 .noticebar__more {
   flex: none;
-  color: var(--ink-muted);
+  color: var(--muted);
 }
 
 .noticebar__close {
   flex: none;
-  width: 18px;
+  width: var(--space-5);
+  /* 图标字形，所以是图元那一档灰（有测试钉着落点） */
   color: var(--ink-faint);
   line-height: 1;
 }
 
 .noticebar__close:hover {
-  color: var(--ink);
+  color: var(--fg);
 }
 
-/* 操作提示气泡。bottom 不是随手挑的：它要越过底栏（约 42px）**和**底栏上方那块
-   「+ 记一件」（上下边距 5/3 + 按钮约 30 = 38px），再加 6px 气口。
+/* 操作提示气泡。bottom 不是随手挑的：它要越过底栏（约 33px）**和**底栏上方
+   那块「+ 记一件」（上下边距 4/4 + 按钮约 28 = 36px），再加气口。
    0.1.2 真人验收时它就压在记一件上过 —— 改这两块高度时一起看这条，
    scripts/smoke.cjs 里「气泡不压住记一件」那条会替你量着。 */
 .flash {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 86px;
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: var(--flash-y);
   display: flex;
   justify-content: center;
   pointer-events: none;
 }
 
 .flash__inner {
-  padding: 5px 12px;
-  border-radius: var(--radius);
-  background: var(--ink);
-  color: var(--sheet);
-  font-size: var(--fs-body);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--text-sm);
   box-shadow: var(--shadow-pop);
-  animation: rise var(--dur-base) var(--ease-out) both;
+  animation: pop-in var(--motion-base) var(--ease-standard) both;
 }
 
-/* 「这次没成功」。用朱砂而不是再加一个新色 —— 这张界面上红只有一个意思 */
+/* 「这次没成功」。用洋红而不是再加一个新色 —— 这张界面上红只有一个意思 */
 .flash__inner--error {
-  background: var(--cinnabar);
+  background: var(--danger);
+  color: var(--on-danger);
 }
 
 /* ---- popover 菜单 ---- */
@@ -1154,39 +1184,39 @@ body,
 .rowmenu {
   position: fixed;
   z-index: 20;
-  min-width: 140px;
-  padding: 4px;
+  min-width: var(--menu-w);
+  padding: var(--space-1);
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
-  animation: pop-in 110ms ease-out;
+  animation: pop-in var(--motion-fast) var(--ease-standard) both;
 }
 
 .rowmenu__item {
   display: block;
   width: 100%;
-  padding: 6px 9px;
-  border-radius: 2px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
   text-align: left;
-  font-size: var(--fs-body);
+  font-size: var(--text-sm);
   transition:
-    background-color var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .rowmenu__item:hover {
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .rowmenu__item--danger {
-  color: var(--cinnabar);
+  color: var(--danger);
 }
 
 .rowmenu__item--danger:hover {
-  background: var(--cinnabar-soft);
-  color: var(--cinnabar);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 /* ---- 浮层：日历与时间轮共用 ----
@@ -1201,30 +1231,19 @@ body,
   position: fixed;
   z-index: 30;
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
-  animation: pop-in 110ms ease-out;
-}
-
-/* 只做透明度与一点点位移。别加 scale —— 格子上的文字会跟着糊一下 */
-@keyframes pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(-3px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+  animation: pop-in var(--motion-fast) var(--ease-standard) both;
 }
 
 .popover--cal {
-  padding: 8px 8px 7px;
+  width: var(--pop-w);
+  padding: var(--space-2) var(--space-2) var(--space-2);
 }
 
 .popover--time {
-  padding: 8px;
+  padding: var(--space-2);
 }
 
 /* ---- 日期控件 ---- */
@@ -1232,42 +1251,42 @@ body,
 .datefield {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-2);
   max-width: 100%;
-  padding: 4px 8px;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--surface);
-  font-size: var(--fs-body);
+  font-size: var(--text-sm);
   white-space: nowrap;
   transition:
-    border-color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease;
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
 .datefield:hover,
 .datefield--open {
-  border-color: var(--indigo);
-  background: var(--indigo-soft);
+  border-color: var(--accent);
 }
 
 /* 这个控件显示的就是答案本身，所以它比标签重；而「周五」是补充信息 */
 .datefield__text {
-  font-weight: 700;
+  font-weight: 400;
+  color: var(--fg);
 }
 
 .datefield__dow {
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--muted);
 }
 
 /* 「今天 / 明天 / 3 天后」。人对相对说法的确定感远高于「9月19日」 */
 .datefield__rel {
-  padding: 1px 5px;
-  border-radius: 2px;
-  background: var(--indigo-soft);
-  color: var(--indigo);
-  font-size: var(--fs-small);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-xs);
 }
 
 .datefield--open .datefield__rel {
@@ -1275,48 +1294,50 @@ body,
 }
 
 .datefield__caret {
+  /* 图标字形，所以是图元那一档灰（有测试钉着落点） */
   color: var(--ink-faint);
-  font-size: 10px;
+  font-size: var(--text-xs);
 }
 
 /* ---- 月历 ---- */
 
 .cal {
   /* 7 列 × 32px + 6 条 1px 缝。固定宽度让翻月时格子不跳 */
-  width: 230px;
+  width: calc(var(--space-12) * 5 + var(--space-2));
 }
 
 .cal__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 6px;
+  padding-bottom: var(--space-1);
 }
 
 .cal__title {
-  font-size: var(--fs-lead);
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-quiet);
+  color: var(--fg);
 }
 
 .cal__nav {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius);
-  font-size: 15px;
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   line-height: 1;
-  color: var(--ink-muted);
+  color: var(--muted);
   transition:
-    background-color var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .cal__nav:hover {
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .cal__dows,
@@ -1326,21 +1347,21 @@ body,
 }
 
 .cal__dows {
-  margin-bottom: 3px;
+  margin-bottom: var(--space-1);
 }
 
 .cal__dow {
   text-align: center;
-  font-size: var(--fs-tiny);
-  letter-spacing: 0.06em;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-quiet);
+  color: var(--muted);
 }
 
-/* 周末那两列**不再单独调淡**：第 2 条规矩只给文字两级灰，而 --ink-faint
-   （浅色 2.56:1 / 深色 3.83:1）连 AA 都不到，它只准给图标字形用（有测试钉着）。
-   周末在哪两列由列序本身就读得出来，不值得为它破一次对比度。 */
+/* 周末那两列**不再单独调淡**：第 3 条规矩只给文字两级灰，而 --ink-faint
+   达不到 AA，它只准给图标字形用（有测试钉着）。周末在哪两列由列序本身
+   就读得出来，不值得为它破一次对比度。这里只把字色升到 --fg-2 */
 .cal__dow--rest {
-  color: var(--ink-muted);
+  color: var(--fg-2);
 }
 
 .cal__grid {
@@ -1348,67 +1369,68 @@ body,
 }
 
 .cal__cell {
-  height: 28px;
-  border-radius: 2px;
+  height: var(--space-6);
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-cell);
-  color: var(--ink);
+  font-size: var(--text-xs);
+  color: var(--fg);
   transition:
-    background-color 100ms ease,
-    color 100ms ease;
+    background-color 100ms var(--ease-standard),
+    color 100ms var(--ease-standard);
 }
 
 .cal__cell:hover {
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* 邻月补进来的日子：点得动，只是不抢眼。
-   淡一档用 --ink-muted 而不是 --ink-faint —— 它是**文案**（数字），
-   而 --ink-faint 达不到 AA。与本月日子的 --ink 相比仍然明显更轻 */
+   淡一档用 --muted 而不是 --ink-faint —— 它是**文案**（数字），
+   而 --ink-faint 达不到 AA。与本月日子的 --fg 相比仍然明显更轻 */
 .cal__cell--out {
-  color: var(--ink-muted);
+  color: var(--muted);
 }
 
-/* 今天用一圈细环，不填色 —— 填色是「选中」的语义，两者不能混 */
+/* 今天是「哪一格是今天」→ 一圈细环；选中是「我挑了这格」→ 填墨。
+   两种语义不能都做成填色，否则点了之后分不清哪格是今天、哪格是选的 */
 .cal__cell--today {
-  box-shadow: inset 0 0 0 1px var(--indigo-line);
-  color: var(--indigo);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent);
 }
 
 .cal__cell--on,
 .cal__cell--on:hover {
-  background: var(--ink);
-  color: var(--sheet);
+  background: var(--fg);
+  color: var(--surface);
   box-shadow: none;
 }
 
 .cal__quick {
   display: flex;
-  gap: 4px;
-  margin-top: 7px;
-  padding-top: 7px;
-  border-top: 1px solid var(--rule);
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
 }
 
 .cal__chip {
   flex: 1;
-  padding: 3px 0;
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--muted);
   transition:
-    border-color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .cal__chip:hover {
-  border-color: var(--indigo);
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ---- 时间控件 ---- */
@@ -1416,36 +1438,36 @@ body,
 .timefield {
   display: inline-flex;
   align-items: center;
-  padding: 4px 9px;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--surface);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-body);
+  font-size: var(--text-sm);
+  color: var(--fg);
   transition:
-    border-color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .timefield:hover,
 .timefield--open {
-  border-color: var(--indigo);
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .timepick {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .timepick__label {
-  margin-bottom: 4px;
-  font-size: var(--fs-tiny);
-  letter-spacing: 0.2em;
-  color: var(--ink-muted);
+  margin-bottom: var(--space-1);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-plate);
+  color: var(--muted);
 }
 
 .timepick__grid {
@@ -1455,35 +1477,35 @@ body,
 
 /* 时：4 列 6 行 = 24。分：3 列 4 行 = 12 档（5 分钟一档） */
 .timepick__grid--h {
-  grid-template-columns: repeat(4, 32px);
-  grid-auto-rows: 24px;
+  grid-template-columns: repeat(4, var(--space-8));
+  grid-auto-rows: var(--space-6);
 }
 
 .timepick__grid--m {
-  grid-template-columns: repeat(3, 34px);
-  grid-auto-rows: 24px;
+  grid-template-columns: repeat(3, calc(var(--space-8) + var(--hair)));
+  grid-auto-rows: var(--space-6);
 }
 
 .timepick__cell {
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-cell);
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--muted);
   transition:
-    background-color 100ms ease,
-    color 100ms ease;
+    background-color 100ms var(--ease-standard),
+    color 100ms var(--ease-standard);
 }
 
 .timepick__cell:hover {
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .timepick__cell--on,
 .timepick__cell--on:hover {
-  background: var(--ink);
-  color: var(--sheet);
+  background: var(--fg);
+  color: var(--surface);
 }
 
 /* ---- 覆盖式视图（编辑器 / 设置）---- */
@@ -1500,32 +1522,33 @@ body,
 }
 
 .page__body {
-  padding: 2px 12px 20px;
+  padding: var(--space-1) var(--space-3) var(--space-5);
 }
 
 /* 分组标题也是一枚铭牌：小、宽字距、灰，上面一道横贯的细线 */
 .group__label {
-  margin-top: 16px;
-  padding: 12px 0 4px;
-  border-top: 1px solid var(--rule);
-  font-size: var(--fs-tiny);
+  margin-top: var(--space-4);
+  padding: var(--space-3) 0 var(--space-1);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   font-weight: 700;
-  letter-spacing: 0.2em;
-  color: var(--ink-muted);
+  letter-spacing: var(--tracking-plate);
+  color: var(--muted);
 }
 
 .group__label:first-child {
   margin-top: 0;
-  padding-top: 14px;
+  padding-top: 0;
   border-top: none;
 }
 
 .field {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--rule);
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
 }
 
 .field:last-child {
@@ -1533,20 +1556,22 @@ body,
 }
 
 .field--stack {
-  display: block;
+  display: grid;
+  gap: var(--space-2);
+  align-items: start;
 }
 
 .field__label {
   flex: none;
-  width: 68px;
-  font-size: var(--fs-body);
-  color: var(--ink-muted);
+  width: var(--field-label);
+  font-size: var(--text-sm);
+  color: var(--muted);
 }
 
 .field--stack .field__label {
   display: block;
   width: auto;
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
 
 .field__control {
@@ -1555,25 +1580,26 @@ body,
 }
 
 .field__hint {
-  margin-top: 5px;
-  font-size: var(--fs-small);
-  line-height: 1.55;
-  color: var(--ink-muted);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+  color: var(--muted);
 }
 
 .field__hint--warn {
-  color: var(--cinnabar);
+  color: var(--danger);
 }
 
 /* 同一行里排几个控件（时刻 + 说明、数字 + 单位） */
 .field__control--row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .field__control--row input[type='number'] {
-  width: 68px;
+  width: var(--num-w);
   flex: none;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -1581,8 +1607,8 @@ body,
 
 .unit {
   flex: none;
-  font-size: var(--fs-body);
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--muted);
 }
 
 /* 分段控件：格子紧贴，1px 的缝里透出容器底色，就是发丝分隔线 */
@@ -1591,36 +1617,36 @@ body,
   flex-wrap: wrap;
   gap: 1px;
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  background: var(--rule);
+  background: var(--rule-strong);
 }
 
 .segmented__item {
-  padding: 3px 10px;
+  padding: var(--space-1) var(--space-3);
   background: var(--surface);
-  font-size: var(--fs-body);
-  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
   text-align: center;
   white-space: nowrap;
   transition:
-    background-color var(--dur-fast) ease,
-    color var(--dur-fast) ease;
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .segmented__item:hover {
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .segmented__item--on {
-  background: var(--ink);
-  color: var(--sheet);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .segmented__item--on:hover {
-  background: var(--ink);
-  color: var(--sheet);
+  background: var(--accent-hover);
+  color: var(--on-accent);
 }
 
 /* overflow:hidden 会切掉外翻的焦点环，往回缩一格。
@@ -1633,7 +1659,7 @@ body,
 
 /* 「每月几号」那 31 个格子。
  *
- * 和月历的 `.cal__cell` 用同一套尺寸（26–28px 高、2px 圆角、1px 缝），所以
+ * 和月历的 `.cal__cell` 用同一套尺寸（24px 高、4px 圆角、1px 缝），所以
  * 它是「月历的另一种读法」而不是另一套控件。**去掉外框**：之前那个一圈
  * 边框加底色把它包成了「一个表单控件」，现在它直接摊在纸面上，像一张月历。
  *
@@ -1643,107 +1669,114 @@ body,
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 1px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--rule-strong);
 }
 
 .daygrid__item {
-  height: 26px;
-  border-radius: 2px;
+  height: var(--space-6);
+  background: var(--surface);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--fg-2);
   transition:
-    background-color 100ms ease,
-    color 100ms ease;
+    background-color 100ms var(--ease-standard),
+    color 100ms var(--ease-standard);
 }
 
 .daygrid__item:hover {
-  background: var(--indigo-soft);
-  color: var(--indigo);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .daygrid__item--on,
 .daygrid__item--on:hover {
-  background: var(--ink);
-  color: var(--sheet);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 /* 复选框 + 文案。原生勾选框在暗色下靠 color-scheme 跟着走 */
 .check {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  font-size: var(--fs-body);
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--fg);
 }
 
 .check input {
   flex: none;
-  accent-color: var(--indigo);
+  accent-color: var(--accent);
 }
 
 .page__foot {
   display: flex;
-  gap: 14px;
-  margin-top: 8px;
+  align-items: center;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
 }
 
 .linkbutton {
-  font-size: var(--fs-body);
-  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  color: var(--muted);
   text-decoration: underline;
 }
 
 .linkbutton:hover {
-  color: var(--indigo);
+  color: var(--accent);
 }
 
 .path {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   word-break: break-all;
   user-select: text;
 }
 
 /* ---- 新建入口（底栏上方正中） ---- */
 
-/* 它是全界面仅有的两个实心墨块之一（另一个在表单的提交钮上），所以别在这里
-   再放第二个带底色的东西。hover 变靛蓝 = 「这条快到了」那个语义不掺进来，
-   只是按钮的按压反馈。 */
+/* 它是全界面仅有的两个大块实底之一（另一个在表单的提交钮上），所以别在这里
+   再放第二个带底色的东西 */
 .addbar {
   flex: none;
   display: flex;
   justify-content: center;
-  padding: 5px 12px 3px;
-  animation: rise var(--dur-scene) var(--ease-out) 120ms both;
+  padding: var(--space-1) var(--space-3);
+  animation: rise var(--motion-scene) var(--ease-standard) 120ms both;
 }
 
 .addbar__button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-width: 148px;
-  padding: 6px 14px;
-  border-radius: var(--radius);
-  background: var(--ink);
-  color: var(--sheet);
-  font-size: var(--fs-body);
+  gap: var(--space-2);
+  min-width: var(--space-12);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--text-sm);
   line-height: 1.3;
-  letter-spacing: 0.06em;
-  transition: background-color 150ms ease;
+  letter-spacing: var(--tracking-button);
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 .addbar__button:hover {
-  background: var(--indigo);
+  background: var(--accent-hover);
 }
 
 /* 按钮里那枚键帽。它教的是 N 这个快捷键 —— 快捷键讲在人会去看的地方，
    比写在设置页里有用。等宽、细描边、跟着字色走 */
 .addbar__key {
   font-family: var(--font-mono);
-  font-size: var(--fs-tiny);
+  font-size: var(--text-xs);
   line-height: 1.2;
-  padding: 1px 4px;
+  padding: 0 var(--space-1);
   border: 1px solid currentColor;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   opacity: 0.65;
 }
 
@@ -1754,67 +1787,74 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--rule);
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
-  animation: rise var(--dur-scene) var(--ease-out) 160ms both;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  animation: rise var(--motion-scene) var(--ease-standard) 160ms both;
 }
 
 .bottombar__link {
-  color: var(--ink-muted);
-  transition: color var(--dur-fast) ease;
+  color: var(--muted);
+  transition: color var(--motion-fast) var(--ease-standard);
 }
 
 .bottombar__link:hover {
-  color: var(--indigo);
+  color: var(--accent);
 }
 
 /* 左边三个账本入口（收件箱 / 以后 / 已完成）。用一条细竖线分开 ——
    两个都叫「· N 件」的按钮挨在一起时，光靠 gap 会读成一个句子。
    竖线挂在第二个按钮的 ::before 上（不是独立的 flex 子项）：DOM 里只多一个
    伪元素，不用为一条线加一个空 span。它落在按钮内，所以那 1px 也算按钮的
-   点击区 —— 一条 9px 高的线，不值得为它再包一层。
+   点击区 —— 一条 8px 高的线，不值得为它再包一层。
    数字本身用等宽（.mono），三个计数竖着对齐 */
 .bottombar__links {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   min-width: 0;
+}
+
+.bottombar__links > * + * {
+  position: relative;
+  padding-left: var(--space-3);
 }
 
 .bottombar__links > * + *::before {
   content: '';
-  display: inline-block;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   width: 1px;
-  height: 9px;
-  margin-right: 10px;
-  vertical-align: -1px;
+  height: var(--space-2);
   background: var(--rule-strong);
 }
 
 .bottombar__state {
-  color: var(--ink-muted);
-  transition: color var(--dur-fast) ease;
+  color: var(--muted);
+  transition: color var(--motion-fast) var(--ease-standard);
 }
 
 .bottombar__state:hover {
-  color: var(--ink-muted);
+  color: var(--accent);
 }
 
 /* 关了通知比暂停更值得说：关了就真的不会响 */
 .bottombar__state--off {
-  color: var(--cinnabar);
+  color: var(--danger);
 }
 
 .bottombar__state--off:hover {
-  color: var(--cinnabar);
+  color: var(--danger);
+  text-decoration: underline;
 }
 
 .bottombar__danger {
-  font-size: var(--fs-body);
-  color: var(--cinnabar);
+  font-size: var(--text-sm);
+  color: var(--danger);
 }
 
 .bottombar__danger:hover {
@@ -1842,22 +1882,24 @@ body,
   isolation: isolate;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  height: 52px;
-  padding: 3px 4px 4px;
-  border-radius: 2px;
+  gap: var(--space-1);
+  height: var(--cell-h);
+  padding: var(--space-1) var(--space-1) var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   text-align: left;
+  overflow: hidden;
   transition:
-    background-color 100ms ease,
-    box-shadow 100ms ease;
+    background-color 100ms var(--ease-standard),
+    box-shadow 100ms var(--ease-standard);
 }
 
 /* hover 用**框**不用底色。
-   格子现在是有底色的（休假 / 调休），拿 `--hover` 去盖会把「那天休假」
+   格子现在是有底色的（休假 / 调休），拿一层底色去盖会把「那天休假」
    这个信息当场擦掉 —— 鼠标划过去的时候最不该丢的恰恰是它。
    框走 `outline` 而不是 `inset box-shadow`：休假那格的底色画在 z-index:-1
    的伪元素上，而 inset 阴影和背景同属一层，会被它盖住。
-   outline 永远画在最上面，也不参与布局（格子只有 1px 缝，外扩的环会压到隔壁那天） */
+   outline 永远画在最上面，也不参与布局 */
 .monthcell:hover {
   outline: 1px solid var(--rule-strong);
   outline-offset: -1px;
@@ -1866,22 +1908,21 @@ body,
 /*
  * 休假 = 给这一天盖一方印。
  *
- * 原来只是一个 10px 描边的「休」字，而格子本身和工作日一模一样 ——
+ * 原来只是一个描边的「休」字，而格子本身和工作日一模一样 ——
  * 一整屏 42 个格子扫下来，那 9 天春节和随便一个周二没有任何区别。
- * 现在整格填淡靛：一个月的假期本来就是一串连着的日子，**底色连起来**
+ * 现在整格填淡紫：一个月的假期本来就是一串连着的日子，**底色连起来**
  * 才看得见「这一整段是假」，小徽标只说得清单格、说不清段落。
  *
  * 底色画在 `::after` 上、左右各外扩半像素，是为了把网格那 1px 的缝盖住：
  * 缝留着的话，九天连休读起来是一条虚线而不是一条色带。
- * 外扩只有半像素，落在普通格子上只是一道抗锯齿的软边，看不出来。
  */
 .monthcell--rest::after {
   content: '';
   position: absolute;
   inset: 0 -0.5px;
   z-index: -1;
-  border-radius: 2px;
-  background: var(--indigo-wash);
+  border-radius: var(--radius-sm);
+  background: var(--accent-wash);
 }
 
 /*
@@ -1890,15 +1931,15 @@ body,
  * 这张月历的颜色预算全给了「休假 / 已经晚了」两件事，没有第三件事的位置。
  */
 .monthcell--work {
-  background: repeating-linear-gradient(
+  background-image: repeating-linear-gradient(
     45deg,
     var(--stripe) 0 1px,
-    transparent 1px 5px
+    transparent 1px var(--space-1)
   );
 }
 
 /*
- * 有逾期未完成的格子：左边一道朱砂。
+ * 有逾期未完成的格子：左边一道洋红。
  *
  * 不给整格填色 —— 假期里一样会欠着账，两种底色会互相盖掉，而被盖掉的那个
  * 恰好是更需要看见的。左边这一笔和看板上那根量尺上的读数针是同一套语言：
@@ -1907,75 +1948,74 @@ body,
 .monthcell--late::before {
   content: '';
   position: absolute;
-  left: 1px;
-  top: 5px;
-  bottom: 5px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--cinnabar);
+  left: var(--hair);
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: var(--hair);
+  background: var(--danger);
 }
 
 /*
  * 选中的格子**不填墨**（浮层里的 `.cal__cell--on` 是填墨的）。
  * 这里格子里还装着徽标、底色与圆点，填了墨它们全得反过来画一遍。
- * 用 2px 实靛框：它压在「休假底」和「调休纹」上都读得出来，而原先那圈
- * 30% 的细靛线在一格有色底的格子上基本看不见 —— 点完不知道选中的是哪个。
+ * 用 2px 实强调色框：它压在「休假底」和「调休纹」上都读得出来。
  *
  * 和键盘焦点环长得一样是有意的：两者说的是同一件事（这一格是当前格），
  * 一个来自鼠标、一个来自 Tab。这里不硬造第二种说法。
  */
 .monthcell--on,
 .monthcell--on:hover {
-  outline: 2px solid var(--indigo);
-  outline-offset: -2px;
+  outline: var(--hair) solid var(--accent);
+  outline-offset: calc(var(--hair) * -1);
 }
 
 .monthcell__top {
   display: flex;
   align-items: center;
-  gap: 3px;
-  min-height: 13px;
+  gap: var(--space-1);
+  min-height: var(--space-3);
 }
 
 .monthcell__day {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-cell);
+  font-size: var(--text-xs);
   line-height: 1;
-  color: var(--ink);
+  color: var(--fg);
 }
 
-/* 邻月补进来的日子：点得动，只是不抢眼（--ink-muted 而不是 --ink-faint，
+/* 邻月补进来的日子：点得动，只是不抢眼（--muted 而不是 --ink-faint，
    后者连 AA 都不到，只准给图标字形用） */
 .monthcell--out .monthcell__day {
-  color: var(--ink-muted);
+  color: var(--muted);
 }
 
-/* 休假那天的日号也染靛蓝：底色说「这段放假」，字色说「就是这天」 */
+/* 休假那天的日号也染强调色：底色说「这段放假」，字色说「就是这天」 */
 .monthcell--rest .monthcell__day {
-  color: var(--indigo);
-  font-weight: 700;
+  color: var(--accent);
+  font-weight: 400;
 }
 
 /* 调休要上班 —— 日号加粗，和斜纹一起把「今天不是假期」说死 */
 .monthcell--work .monthcell__day {
-  font-weight: 700;
+  color: var(--fg);
+  font-weight: 400;
 }
 
 /*
- * 今天 = 日号上盖一枚实心靛蓝印。**放在最后**：它要压过
+ * 今天 = 日号上盖一枚实心强调色印。**放在最后**：它要压过
  * 上面那几条日号染色（休假 / 调休 / 邻月），否则今天恰好是个调休周六时
  * 就会被盖掉，而它恰恰是打开日历第一个要找的位置。
  *
  * 和「选中」不打架：今天是一个**点**，选中是一个**框**，两者可以同时出现。
  */
 .monthcell--today .monthcell__day {
-  min-width: 15px;
-  padding: 1px 3px;
-  border-radius: 2px;
-  background: var(--indigo);
-  color: var(--on-indigo);
-  font-weight: 700;
+  min-width: var(--space-4);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 400;
   text-align: center;
 }
 
@@ -1983,251 +2023,242 @@ body,
    再加一圈描边就成了两层框。字只负责把底色没说清的那半句补上 */
 .monthcell__badge {
   flex: none;
-  font-size: var(--fs-tiny);
-  line-height: 12px;
-  font-weight: 700;
-  color: var(--indigo);
+  font-size: var(--text-xs);
+  line-height: 1;
+  font-weight: 400;
+  color: var(--accent);
 }
 
 .monthcell__badge--work {
-  color: var(--ink);
-  font-weight: 700;
+  color: var(--fg-2);
+  font-weight: 400;
 }
 
-/* 农历日 / 节气 / 节日。9.5px 是这条能读清的下限，
+/* 农历日 / 节气 / 节日。12px 是这条能读清的下限，
    再小中文就糊了 —— 而它下面还有一行圆点要放 */
 .monthcell__label {
   overflow: hidden;
-  font-size: var(--fs-micro);
+  font-size: var(--text-xs);
   line-height: 1.2;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--ink-muted);
+  color: var(--muted);
 }
 
 /* 节气是这一天**真的有节点**（立春、清明、冬至），和「初七」这种纯编号不同。
-   染成靛蓝：它和假期、和「快到了」是同一类信息 —— 值得记一笔的日子。
-   底色留给休假，所以这条只加字色和字重，不再叠一层背景 */
+   染成强调色：它和假期、和「快到了」是同一类信息 —— 值得记一笔的日子。
+   底色留给休假，所以这条只加字色，不再叠一层背景 */
 .monthcell__label--term {
-  color: var(--indigo);
-  font-weight: 700;
+  color: var(--accent);
+  font-weight: 400;
 }
 
 /* 邻月补进来的那一格：连节气也压回 muted —— 它不属于眼前这个月 */
 .monthcell--out .monthcell__label {
-  color: var(--ink-muted);
+  color: var(--muted);
 }
 
 /* 休假那天的农历文字**升一级灰**。
-   不是审美选择：底色一深，`--ink-muted` 就掉到 4.5:1 以下了（浅色主题的
-   `--paper` 上只剩 5.05 的余量，任何一点底色都会吃掉它）。这条有测试守着 */
+   不是审美选择：底色一深，`--muted` 就掉到 4.5:1 以下了（浅色主题的
+   `--surface-warm` 上只剩 4.90 的余量，任何一点底色都会吃掉它）。
+   所以假日那格的字升到 --fg。这条有测试守着 */
 .monthcell--rest .monthcell__label {
-  color: var(--ink);
+  color: var(--fg);
 }
 
-/* 但假日里的节气要保住靛蓝：立春正好落在春节里（2026 就是），
+/* 但假日里的节气要保住强调色：立春正好落在春节里（2026 就是），
    那天的「立春」比「休」更值得看一眼。所以这条排在 `--rest` 后面 */
 .monthcell--rest .monthcell__label--term {
-  color: var(--indigo);
+  color: var(--accent);
 }
 
 .monthcell__dots {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--hair);
   margin-top: auto;
-  min-height: 5px;
+  min-height: var(--space-1);
 }
 
-/* 圆点改成方点：仪器上的指示格不做圆的，2px 圆角跟着全界面走 */
+/* 圆点改成方点：仪器上的指示格不做圆的 */
 .monthdot {
-  width: 4px;
-  height: 4px;
-  border-radius: 1px;
-  background: var(--indigo);
+  width: var(--space-1);
+  height: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
 }
 
-/* 有逾期的任务 → 朱砂。这里红的意思仍然是「已经晚了」，没有新语义 */
+/* 有逾期的任务 → 洋红。这里红的意思仍然是「已经晚了」，没有新语义 */
 .monthcell__dots[data-late='1'] .monthdot {
-  background: var(--cinnabar);
+  background: var(--danger);
 }
 
 .monthcell__more {
-  margin-left: 1px;
+  margin-left: var(--hair);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-micro);
+  font-size: var(--text-xs);
   line-height: 1;
-  color: var(--ink-muted);
+  color: var(--danger);
 }
 
 /* 「这一年没有休假数据」之类的一句实话。说事实，不道歉 */
 .cal__note {
-  margin-top: 9px;
-  font-size: var(--fs-small);
-  line-height: 1.5;
-  color: var(--ink-muted);
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-warm);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+  color: var(--muted);
 }
 
 .cal__note-link {
-  margin-left: 6px;
+  margin-left: var(--space-2);
 }
 
 /*
  * 选中那天的明细。
  *
- * 铺一层 `--sheet`（比窗口纸 `--paper` 亮一档）而不是只画一条发丝线：
+ * 铺一层带描边的纸面而不是只画一条发丝线：
  * 整页原来是「月历 + 一条线 + 一堆小字」的一根柱子，看不出下面这段
  * 是**另一个东西**。一张纸压在工作台上，正好也是这本账的口气。
- * 深色主题同理（--sheet 比 --paper 亮一档），不用单独处理。
  */
 .daycard {
-  margin-top: 12px;
-  padding: 12px 12px 13px;
-  border-radius: var(--radius);
-  background: var(--sheet);
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
 }
 
 .daycard__head {
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--rule);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
 }
 
 .daycard__line {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px 7px;
+  gap: var(--space-1) var(--space-2);
 }
 
-/* 16px + 加粗 + 大字距：这一天的标头，和页面标题同一级 */
+/* 等宽大日期：这一天的标头，和页面标题同一级 */
 .daycard__date {
-  font-size: var(--fs-sub);
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg);
 }
 
 .daycard__dow {
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--fg-2);
 }
 
 /* 「春节 第 3/9 天」「调休上班 · 为春节」这类附注。
-   填淡靛底、去掉描边：它是个**章**，不是个按钮 */
+   细描边 + 强调色字：它是个**章**，不是个按钮 */
 .daycard__chip {
-  padding: 1px 6px;
-  border-radius: 2px;
-  background: var(--indigo-wash);
-  font-size: var(--fs-tiny);
-  color: var(--indigo);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--accent);
 }
 
 .daycard__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px 10px;
-  margin-top: 4px;
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--muted);
 }
 
 .daycard__empty {
-  padding: 14px 0;
-  font-size: var(--fs-body);
-  color: var(--ink-muted);
+  padding: var(--space-4) 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
 }
 
 .daycard__foot {
-  margin-top: 8px;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
 }
 
 .daycard__add {
-  padding: 4px 12px;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
-  font-size: var(--fs-body);
-  color: var(--ink-muted);
-  transition:
-    border-color var(--dur-fast) ease,
-    color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease;
+  font-size: var(--text-sm);
+  color: var(--accent);
 }
 
 .daycard__add:hover {
-  border-color: var(--indigo);
-  color: var(--indigo);
-  background: var(--indigo-soft);
+  text-decoration: underline;
 }
 
 /* ---- 倒计时页 ---- */
 
 /*
- * 最近的假期 —— 这一屏唯一的一块实心靛蓝。
+ * 最近的假期 —— 这一屏唯一的一块实心读数板。
  *
  * 原来它只有一条底部的发丝线，于是「还有 2 天」这屏最重要的信息
- * 长成了和下面每一行一样的白底小字。整块靛蓝是这张界面上最重的底色，
+ * 长成了和下面每一行一样的白底小字。整块实底是这张界面上最重的底色，
  * 只给「最近的那个日子」用一份，一天比一天近的那个数字才接得住这份重量。
  *
- * 用靛蓝不用墨：靛蓝在这里本来就是「快到了」，而墨色实心块全局只有两处
- * （记一件和表单的提交钮），再多一块就把那两处压没了。
- *
- * 底和字取 `--slab` / `--on-slab`，不取 `--indigo` / `--on-indigo`：后一对是给
- * 「一小块」调的 —— 15px 的今日日号、药丸大的日期牌，面积小、深色下亮一点反而
- * 看得清。这里是 100×150 的整块，深色的 `--indigo`（#82b0d8）铺满一屏会晃眼，
- * 而这个应用夜里也开着。所以大面积单开一对：底压到中靛，字改成一色的白
- * （`--indigo` 明暗两套相反、`--slab` 两套都偏深，所以 `--on-slab` 不必跟着反过来）。
- * 面积决定用哪一对，不看语义 —— 语义上它们都是「靛蓝」。
+ * 用 `--slab` 不用 `--accent`：强调色是说「按我」的，这块只是读数；
+ * 而且深色下 `--accent` 是亮紫，铺满一屏会晃眼，而这个应用夜里也开着。
  */
 .hero {
-  margin-top: 2px;
-  padding: 13px 14px 14px;
-  border-radius: var(--radius);
+  margin-top: var(--space-1);
+  padding: var(--space-5);
+  border-radius: var(--radius-md);
   background: var(--slab);
   color: var(--on-slab);
 }
 
 .hero__label {
-  font-size: var(--fs-tiny);
-  font-weight: 700;
-  letter-spacing: 0.2em;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-plate);
   color: var(--on-slab);
   opacity: 0.75;
 }
 
 .hero__name {
-  margin-top: 5px;
-  font-size: var(--fs-title);
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  margin-top: var(--space-2);
+  font-size: var(--text-xl);
+  font-weight: 300;
+  letter-spacing: var(--tracking-display);
 }
 
 .hero__days {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  margin-top: 2px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
-/* 这一页的读数。和表头那个大日期同一套：等宽 + 加粗 */
+/* 这一页的读数。和表头那个大日期同一套：等宽 + 细字重 */
 .hero__num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-hero);
-  font-weight: 700;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
+  font-size: var(--text-2xl);
+  font-weight: 300;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-display);
   color: var(--on-slab);
 }
 
 .hero__unit {
-  font-size: var(--fs-body);
+  font-size: var(--text-sm);
   color: var(--on-slab);
   opacity: 0.75;
 }
 
 .hero__sub {
-  margin-top: 4px;
-  font-size: var(--fs-small);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--on-slab);
   opacity: 0.75;
 }
@@ -2235,106 +2266,97 @@ body,
 /* 假期与纪念日共用的一行。一个可点（改）、一个不可点（节假日是抄来的，
    改不了），所以点击区单独一层 `.crow__hit` */
 .crow {
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--border);
 }
 
 .crow--static {
-  padding: 8px 0;
+  padding: var(--space-2) 0;
 }
 
 .crow__hit {
   display: block;
   width: 100%;
-  padding: 8px 0;
+  padding: var(--space-2) 0;
   text-align: left;
+}
+
+.crow__hit:hover .crow__title {
+  color: var(--accent);
 }
 
 .crow__line {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .crow__title {
   overflow: hidden;
-  font-size: var(--fs-lead);
+  font-size: var(--text-sm);
+  color: var(--fg);
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.crow__hit:hover .crow__title {
-  color: var(--indigo);
 }
 
 /*
  * 倒数中的天数 —— 这一页的**节奏器**。
  *
- * 给每一行同一个淡靛块、右端对齐，一列扫下来就是「离那天还有多远」的刻度；
- * 原先所有数字都是同色的 12px 小字，混在标题里，一行一行读过去没有任何抓手。
- * 等宽数字让那一列真能竖着对齐。块而不是满圆角胶囊：这张界面的圆角只有
- * `--radius` 一档（2px），满圆会是第三套形状语言。
+ * 给每一行同一个淡紫块、右端对齐，一列扫下来就是「离那天还有多远」的刻度；
+ * 等宽数字让那一列真能竖着对齐。
  *
- * 到了那天换成实心靛蓝（今天不是「晚了」，不能借朱砂）。
+ * 到了那天换成实心强调色（今天不是「晚了」，不能借洋红）。
  */
 .crow__days {
   flex: none;
-  padding: 1px 7px;
-  border-radius: var(--radius);
-  background: var(--indigo-wash);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--accent-wash);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-small);
-  color: var(--indigo);
+  font-size: var(--text-sm);
+  color: var(--accent);
 }
 
 .crow__days[data-today='1'] {
-  background: var(--indigo);
-  color: var(--on-indigo);
-  font-weight: 700;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 400;
 }
 
 .crow__sub {
-  margin-top: 3px;
-  font-size: var(--fs-small);
-  color: var(--ink-muted);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--muted);
 }
 
 /* 加 / 改纪念日的表单。用发丝线分块，不做卡片 ——
-   这张界面上没有一个带底色的盒子（除了两枚实心按钮） */
+   这张界面上没有一个带底色的盒子（除了那两枚实底按钮） */
 .annform {
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--rule);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-warm);
 }
 
 .annform__head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding: 8px 0 2px;
+  margin-bottom: var(--space-2);
 }
 
 .annform__title {
-  font-size: var(--fs-body);
+  font-size: var(--text-sm);
+  color: var(--fg);
 }
 
 .annform__foot {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-top: 10px;
-}
-
-/* 页中间的空状态：`.empty` 那 64px 的顶部留白是给整屏空的看板用的，
-   这里上面还有节假日那一段，不能那么奢侈。尺子那段也收掉 —— 页中间
-   再来一段装饰会把上面那块实心靛蓝压住 */
-.empty--tight {
-  padding: 20px 0 22px;
-  font-size: 15px;
-}
-
-.empty--tight::before {
-  display: none;
+  gap: var(--space-4);
+  padding-top: var(--space-3);
 }
 
 /* ---- 快速添加小窗（无边框窗口，整页就是它）---- */
@@ -2342,11 +2364,11 @@ body,
 .quickadd {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   height: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--rule-strong);
-  background: var(--sheet);
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-warm);
 }
 
 /* 输入框吃掉多余的高度，按钮行就永远贴在底部 ——
@@ -2354,66 +2376,67 @@ body,
 .quickadd__title {
   flex: 1 1 auto;
   min-height: 36px;
-  padding: 0 0 4px;
+  padding: 0 0 var(--space-1);
   border: none;
   border-bottom: 1px solid var(--rule-strong);
   border-radius: 0;
   background: transparent;
-  font-size: var(--fs-sub);
+  font-size: var(--text-base);
 }
 
 .quickadd__title:focus {
-  border-bottom-color: var(--indigo);
+  border-bottom-color: var(--accent);
   outline-offset: 0;
 }
 
 .quickadd__row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .quickadd__btn {
   flex: none;
-  padding: 3px 10px;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
-  font-size: var(--fs-body);
-  color: var(--ink-muted);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
   white-space: nowrap;
   transition:
-    border-color var(--dur-fast) ease,
-    color var(--dur-fast) ease,
-    background-color var(--dur-fast) ease;
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
 .quickadd__btn:hover {
-  border-color: var(--indigo);
-  color: var(--indigo);
-  background: var(--indigo-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .quickadd__btn--primary {
-  border-color: transparent;
-  background: var(--ink);
-  color: var(--sheet);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .quickadd__btn--primary:hover {
-  border-color: transparent;
-  background: var(--indigo);
-  color: var(--sheet);
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+  color: var(--on-accent);
 }
 
-/* 把「全天那三个」和「带时刻那两个」在视觉上分开 */
+/* 把「全天那三个」和「带时刻那两个」在视觉上分开。
+   一条细竖线而不是 flex:1 的空隙 —— 440×110 的窗里那两个按钮已经贴着
+   两边了，再撑开会把中间那点留白吃掉 */
 .quickadd__sep {
   width: 1px;
   align-self: stretch;
-  margin: 0 2px;
-  background: var(--rule);
+  margin: 0 var(--space-1);
+  background: var(--border);
 }
 
 .quickadd__time {
   flex: none;
-  width: 92px;
+  width: var(--time-w);
 }

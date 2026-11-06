@@ -1,220 +1,251 @@
 /*
- * 「尺规」—— 一台量「今天还剩多少」的仪表。
+ * 「尺规」—— 一台量「今天还剩多少」的仪表（Stripe 令牌版）
  *
  * 这件工具回答的是一个**可数**的问题：今天还剩几件、哪几件已经越线了。
- * 所以整张界面按仪表的规矩来组织：一根带分格的量尺（左边那根竖轴）、
- * 一组读数（表头那块 label + value 的格子）、以及一个等宽的刻度表盘。
+ * 界面按仪表的规矩组织，主角是三样东西：
  *
- * 三条决定了这套令牌的走向：
+ *   1. 左边一根**带分格的量尺**（两级刻度 + 一根通到底的轴）；
+ *   2. 表头一块**读数带**（现在 / 还剩 / 逾期）；
+ *   3. 一行**大号等宽日期**。
  *
- *   1. **数字一律等宽。** 时刻、计数、大日期、倒计时天数全走 --font-mono +
- *      tabular-nums。等宽数字才能竖着对齐成一条线 —— 那是「扫一眼读出今天
- *      的节奏」的前提，也是这台仪表唯一的主角。**宋体退场了**：它做数字在
- *      高分屏上偏单薄，而中文标题改用雅黑 + 大字距，读起来更像仪表盘上的
- *      丝印铭牌，比衬线更贴方向。
+ * 这一版把整套视觉搬到了 Stripe 那套令牌上（design-workbench/REQ-S31-03）。
+ * 结构、几何、语义一条没动，换的是**底色与材质**：从「灰纸 + 靛蓝」变成
+ * 「白纸 + 深海军墨 + 一个紫罗兰强调色」。所以下面这些规矩仍然全部生效，
+ * 改样式时别破坏：
  *
- *   2. **只有两个色相。** 靛蓝 = 结构（量尺、刻度、控件）与「快到了」；
- *      朱砂 = 只留给**已经晚了**（逾期 / 出错 / 通知已关 / 删除）。
- *      暖色只有一处出口，所以这张界面上「红」永远只有一个意思：你晚了。
- *      「快到了」不靠颜色，靠刻度的**长度与加粗** —— 琥珀色那档早撤了，
- *      它和朱砂是同一个语义量级，两个色相说同一件事只会互相稀释。
+ *   1. **数字一律等宽**（--font-mono + tabular-nums）。等宽数字才能竖着对齐
+ *      成一条线 —— 那是「扫一眼读出今天的节奏」的前提，也是这台仪表的主角。
+ *      中文一律走系统无衬线（雅黑那一支），宋体退场。
  *
- *   3. **三层纸，发丝线，2px 圆角。** 仪器是直角的东西，圆角只留到刚好
- *      不割手。层级靠纸的明度差与 --rule 的一条线，不靠阴影；阴影全界面
- *      只有浮层用得起。
+ *   2. **只有两个色相。** --accent（紫罗兰）= 结构 / 「按我」/ 快到了；
+ *      --danger（洋红）= 只留给**已经晚了**（逾期 / 出错 / 删除 / 通知已关）。
+ *      「快到了」不靠新色相，靠刻度的长度与加粗 —— 琥珀色那档早撤了。
  *
- * 深色不用 filter: invert()，逐个给值 —— 反转会把朱砂变青绿，语义直接反了。
- * color-scheme 让原生控件（滚动条、复选框）跟着主题走，少了它深色界面里
- * 会冒出几块白底。
+ *   3. **实底上的字是另一组耦合**，和「写在纸上的字」分开管：
+ *      --on-accent 压 --accent、--on-slab 压 --slab、--on-danger 压 --danger。
+ *      深色主题下 --accent 是亮紫，压在上面的字必须翻成墨色（和旧版的
+ *      --indigo / --on-indigo 同一条道理）。**新开一对「底 + 上面的字」就要
+ *      同步进 core-test 的 SOLID_PAIRS 表**，否则调亮一个底就会静默掉到 AA 以下。
+ *
+ *   4. **所有当文字用的色，在三种纸上都要 ≥4.5:1**（--bg / --surface /
+ *      --surface-warm）。这条有测试守着。原型给的 --muted (#64748d) 在
+ *      --surface-warm 上只有 4.49:1 —— 差 0.01，所以这里压到 #5f6e85；
+ *      原型的 --danger (#ea2261) 只有 4.29:1，压到 #c81e57。
+ *      **改色时先跑 `pnpm test:core`，别靠肉眼。**
+ *
+ *   5. **--ink-faint 只准给图标字形用**（⋮ × ▾ 和标题带那三个字形），
+ *      它是 3:1 那一档（UI 图元的标准），不是文案档。这条也有测试守着落点。
+ *
+ * 深色不用 filter: invert()，逐个给值 —— 反转会把 danger 变青绿，语义直接反了。
+ * color-scheme 让原生控件（滚动条、复选框）跟着主题走。
  */
 :root {
   color-scheme: light dark;
 
-  /* ---- 三层纸：窗口底 / 列表纸面 / 控件面 ---- */
-  --paper: #e4e7e9;
-  --sheet: #f1f3f4;
+  /* ---- 三层纸：窗口底 / 纸面 / 控件面 ---- */
+  --bg: #ffffff;
   --surface: #ffffff;
+  --surface-warm: #f6f9fc;
 
-  --ink: #12181c;
-  --ink-muted: #566269;
-  --ink-faint: #87929a;
+  /* ---- 墨色两级 + 图元一档 ---- */
+  --fg: #061b31;
+  --fg-2: #273951;
+  /* 原型是 #64748d，在 --surface-warm 上 4.49:1（差一点点），压深一档到 4.90 */
+  --muted: #5f6e85;
+  /* 只给图标字形：3:1 那一档，不是文案档（三层纸上最差 3.20） */
+  --ink-faint: #7f8da0;
 
-  --rule: #d5dadd;
-  --rule-strong: #b6bec2;
+  /* ---- 线 ---- */
+  --border: #e5edf5;
+  /* 控件描边。由墨色推出来，所以深浅两套不用各写一次 */
+  --rule-strong: color-mix(in oklab, var(--fg), transparent 62%);
 
-  --indigo: #1f4a72;
-  --indigo-soft: rgba(31, 74, 114, 0.08);
-  --indigo-line: rgba(31, 74, 114, 0.3);
-
-  /*
-   * 靛蓝的第三档浓度：「印」。
-   *
-   * soft（8%）只够当 hover 背景 —— 它铺满一整格时几乎看不出来，于是日历上
-   * 放假的那几天和普通工作日在屏幕上是同一个灰。wash 是**成片**用的：
-   * 整格填上之后，连着的几天会自己连成一条色带，「这一整段是假」才看得出来。
-   *
-   * 加的是浓度不是色相 —— 第 2 条规矩守的是「不要用第四个颜色说新的事」，
-   * 不是「同一个颜色只能有一个深浅」。
-   */
-  --indigo-wash: rgba(31, 74, 114, 0.14);
-  /* 靛蓝实底上压的字。深色主题要反过来（那边的靛蓝是亮蓝），见下 */
-  --on-indigo: #f1f3f4;
+  /* ---- 强调色（紫罗兰）：结构 / 「按我」/ 快到了 ---- */
+  --accent: #533afd;
+  --accent-hover: #4434d4;
+  --on-accent: #ffffff;
+  --accent-soft: color-mix(in oklab, var(--accent), transparent 92%);
+  --accent-wash: color-mix(in oklab, var(--accent), transparent 95%);
+  --accent-line: color-mix(in oklab, var(--accent), transparent 70%);
 
   /*
-   * 实心块（倒计时页那块「最近的假期」）。
+   * ---- 朱砂换成洋红：已经晚了 ----
    *
-   * **大面积铺色和当文字用不是一回事**：浅色主题下 --indigo 本来就深，
-   * 铺满 150px 高正好；深色主题下它是亮蓝（#82b0d8），当字、当那枚小小的
-   * 「今天」印都好，铺成一大块就晃眼了 —— 这个应用是夜里也会开着的常驻托盘工具。
-   * 所以块自己拿一对值：深色下压到中靛，字仍是浅的。
-   *
-   * --on-slab 两套主题同一个值，不像 --on-indigo 那样要反过来 —— 因为
-   * --indigo 在两套里明暗相反（深蓝 / 亮蓝），而 --slab 两套都偏深，
-   * 压在它上面的字在两套里本来就都是浅的。
-   *
-   * 取纯白不取 --on-indigo 那个 #f1f3f4：块里的 .hero__label/__unit/__sub
-   * 都带 opacity: 0.75，混出来的实色才是真正被读的颜色 —— #f1f3f4 混完
-   * 在深色的中靛上只剩 4.66:1，余量 0.16，和当初 --ink-muted 那个坑一样薄。
-   * 纯白混完两头都有余量（浅色 5.99:1 / 深色 5.51:1）。
+   * 原型给的是 Stripe 那个 #ea2261，在三层纸上最差只有 4.06:1（--surface-warm）。
+   * 压到 #c81e57 之后最差 5.26:1，仍然是同一个色相（洋红偏玫红），
+   * 和旧的砖红 #b3352a 是两个东西 —— 旧版那个偏土，这一版偏冷。
    */
-  --slab: #1f4a72;
+  --danger: #c81e57;
+  --on-danger: #ffffff;
+  --danger-soft: color-mix(in oklab, var(--danger), transparent 92%);
+
+  /*
+   * ---- 实心读数板（倒计时那块大盘）----
+   *
+   * 它不取强调色：强调色是说「按我」的，这块只是读数。取 --fg（深海军墨），
+   * 两套主题都偏深，所以 --on-slab 恒为白。
+   *
+   * **必须连 opacity 一起算**：块里的小字都带 0.75，混出来的实色才是被读到的
+   * 颜色。白 @75% 压在 #061b31 上是 7.8:1，两头都有余量。
+   */
+  --slab: #061b31;
   --on-slab: #ffffff;
 
-  /* 调休上班的斜纹。**用墨色不用靛蓝** —— 靛蓝在这张月历上已经等于「放假」，
-     同色再来一档就说不清那天到底休不休。斜纹的语义是「本该休息的那天被划掉了」 */
-  --stripe: rgba(18, 24, 28, 0.2);
-
-  /* 朱砂。三层纸最差 4.89:1（--paper 上），和 --ink-muted 的余量相当。
-     顶栏的「逾期 N」和底栏的「提醒已关闭」正是朱砂写在纸底上的字 */
-  --cinnabar: #b3352a;
-  --cinnabar-soft: rgba(179, 53, 42, 0.09);
-
-  /* 刻度尺最弱的一档。比竖轴（--rule）略深一点点，
-     所以「轴 + 刻度」读起来是刻度压在轴上，而不是三根一样淡的线叠在一起 */
-  --tick-none: #aab3b7;
+  /* 调休上班的斜纹。**用墨色不用强调色** —— 强调色在这张月历上已经等于
+     「放假」，同色再来一档就说不清那天到底休不休 */
+  --stripe: color-mix(in oklab, var(--fg), transparent 86%);
 
   /*
-   * 尺上的**分格线** —— 两级，二级才是尺。
+   * ---- 尺上的分格线：两级，二级才是尺 ----
    *
    * 只有一级、每 4px 一道的话那是把梳子：整根轴糊成一条均匀的虚线，
    * 行自己那道读数反而跳不出来。真的尺都是两级 —— 小格密而短、主格疏而长。
-   * 主格走 --rule（和轴同色，读起来是「轴在分格」），小格比它更淡
-   * （--graduation 是纹理，不是信息）。
+   * 主格走 --rule-strong（和轴同色，读起来是「轴在分格」），
+   * 小格走 --graduation（比它淡，是纹理不是信息）。
    */
-  --graduation: rgba(18, 24, 28, 0.12);
+  --graduation: color-mix(in oklab, var(--fg), transparent 88%);
+  /* 两级刻度的间距与长度。小格是纹理、主格是「轴在分格」，两者差一档才像尺 */
   --grad-pitch: 5px;
   --grad-len: 3px;
   --grad-major-pitch: 20px;
   --grad-major-len: 8px;
 
-  --hover: rgba(31, 74, 114, 0.06);
-  --cursor-bg: rgba(31, 74, 114, 0.08);
+  --shadow-pop:
+    rgba(6, 27, 49, 0.08) 0 6px 16px -6px,
+    rgba(6, 27, 49, 0.12) 0 12px 28px -12px;
 
-  --shadow-pop: 0 10px 28px rgba(18, 24, 28, 0.18);
-
-  /* 直角。仪器不做圆角，只留到刚好不割手 */
-  --radius: 2px;
+  /* ---- 圆角：两档，跟着尺寸走（控件用 sm、浮层与卡片用 md） ---- */
+  --radius-sm: 4px;
+  --radius-md: 6px;
 
   /*
    * ---- 横向几何：量尺的定位 ----
    *
    * 改一处要全改，所以集中记在这、并让下游都由它推出来：
-   *   游标(3) → 时刻列(52，含左内边距 9) → 刻度列(17)
-   * 竖轴落在 x = --ruler-x 上；段标签的左内边距 = 轴 + 粗刻度(9) + 气口(8)。
+   *   游标(4) → 时刻列(48，含左内边距 8) → 刻度列(16)
+   * 竖轴落在 x = --ruler-x 上；段标签的左内边距 = 轴 + 粗刻度(8) + 气口(8)。
    *
-   * 时刻列那 52px **必须恒定渲染** —— 没有时刻的行也要占着它，否则那一段
+   * 时刻列那 48px **必须恒定渲染** —— 没有时刻的行也要占着它，否则那一段
    * 的轴会整体左移，一根轴断成两截（scripts/smoke.cjs 里「竖轴逐行对齐」守这条）。
    */
-  --w-cursor: 3px;
-  --w-clock: 52px;
-  --w-tick: 17px;
-  --ruler-x: 55px;
-  /* 55 + 9(粗刻度) + 8(气口) */
-  --label-pad: 72px;
+  --w-cursor: 4px;
+  --w-clock: 48px;
+  --w-tick: 16px;
+  --ruler-x: 52px;
+  --label-pad: 68px;
+
+  /* ---- 刻度本体：三档长度 ---- */
+  --tick-idle: 8px; /* 不急：细灰短刻 */
+  --tick-soon: 12px; /* 一小时内：强调色加粗 */
+  --tick-over: 20px; /* 逾期：洋红加粗，并且越过轴向左伸出 */
 
   /* ---- 字族：只用系统字体，离线双击就得能用 ----
    *
-   * 正文一律走微软雅黑：中文界面里它是那个「不说话也不出错」的选择，
-   * 而**它不做展示字** —— 这台仪表的展示面是下面那套等宽读数。
+   * 展示面走 SF Pro / Segoe UI 那一支；中文交给雅黑 —— 中文界面里它是那个
+   * 「不说话也不出错」的选择。**宋体退场了**：它做数字在高分屏上偏单薄，
+   * 做标题又和这台仪表的读数气质不合。
    */
-  --font-ui: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB',
-    system-ui, sans-serif;
+  --font-display:
+    'SF Pro Display', -apple-system, 'Segoe UI Variable Display', 'Segoe UI',
+    'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  --font-body: var(--font-display);
   /*
    * 读数。所有数字、时刻、计数、大日期都走它。
-   *
-   * Cascadia Mono 是 Win11 自带的，Consolas 是 Win7 以来必备 —— 降级链保证
-   * 离线可用。等宽 + tabular-nums 是「竖着扫读一天」的技术前提：比例数字里
-   * 1 和 8 的宽度不一样，一列时刻会读成锯齿。
+   * Cascadia Mono 是 Win11 自带的，Consolas 是 Win7 以来必备 —— 降级链保证离线可用。
    */
-  --font-mono: 'Cascadia Mono', Consolas, ui-monospace, monospace;
+  --font-mono: 'Cascadia Mono', Consolas, ui-monospace, 'SF Mono', Menlo, monospace;
 
-  /*
-   * ---- 字阶：1.2 比例，禁止临时手写数值 ----
-   *
-   * 大日期与倒计时天数是「读数」，比正文高整整两级 —— 这台仪表上最该被
-   * 一眼读到的东西就是这两个数。
-   */
-  --fs-micro: 9.5px; /* 格子里最小的一行字：农历、圆点溢出的数字 */
-  --fs-tiny: 10.5px; /* 铭牌标签：段标签、表头读数、分组标题 */
-  --fs-small: 11.5px; /* 药丸、徽标、附注、底栏、提示条 */
-  --fs-cell: 12px; /* 密集格子里的一格：时刻列、月历、时分 */
-  --fs-body: 12.5px; /* 正文与控件 */
-  --fs-lead: 13.5px; /* 行标题 —— 正文里最重的一级 */
-  --fs-sub: 16px; /* 副标题：日历页那天、快速添加的输入框 */
-  --fs-title: 18px; /* 页面标题 */
-  --fs-hero: 34px; /* 倒计时的天数读数 */
-  --fs-readout: 36px; /* 表头的大日期读数 */
+  /* ---- 字阶：角色级令牌，禁止临时手写数值 ---- */
+  --text-xs: 12px; /* 铭牌标签、段标签、读数标签、底栏、月历小字 */
+  --text-sm: 14px; /* 正文与控件、行标题 */
+  --text-base: 16px; /* 页面正文 */
+  --text-lg: 18px; /* 读数带的值、页面标题 */
+  --text-xl: 22px; /* 倒计时 hero 的名字 */
+  --text-2xl: 32px; /* 表头的大日期、倒计时天数 */
+
+  /* ---- 行高与字距 ---- */
+  --leading-body: 1.4;
+  --leading-tight: 1.1;
+  /* 大字标题用的负字距（读数、大日期） */
+  --tracking-display: -0.02em;
+  /* 仪表铭牌那一头的正字距，命名成四档角色，免得十几处各写各的字面量 */
+  --tracking-plate: 0.2em; /* 月份 / 段标签 / 读数标签 / 组名 */
+  --tracking-title: 0.14em; /* 覆盖式视图的标题、空态主句 */
+  --tracking-quiet: 0.08em; /* 星期 / 空态提示 */
+  --tracking-button: 0.06em; /* 实底按钮 */
 
   /* ---- 间距：4 的倍数，纵向节奏靠它 ---- */
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 18px;
-  --sp-5: 28px;
-  --sp-6: 44px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
 
   /* ---- 动效 ---- */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --dur-fast: 120ms; /* 悬停、按压 */
-  --dur-base: 200ms; /* 常规过渡 */
-  --dur-scene: 320ms; /* 换视图 */
+  --motion-fast: 120ms; /* 悬停、按压 */
+  --motion-base: 200ms; /* 常规过渡 */
+  --motion-scene: 320ms; /* 换视图 */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /*
+   * ---- 组件几何：一律由 --space-* 推出来，不写裸像素 ----
+   * （1px / 2px 的发丝线与描边宽度不算在这里 —— 那是线宽，不是间距。）
+   */
+  --hair: calc(var(--space-1) / 2); /* 2px 的加粗笔画 */
+  --titlebar-h: 32px; /* 无框窗口的自绘标题带 */
+  --field-label: calc(var(--space-12) + var(--space-4) + var(--space-1)); /* 68 */
+  --num-w: calc(var(--space-12) + var(--space-4) + var(--space-1)); /* 68 */
+  --time-w: calc(var(--space-12) + var(--space-8) + var(--space-1)); /* 81 */
+  /* 230 的月历（7×32 + 6 缝）+ 左右 8 气口 + 描边 */
+  --pop-w: calc(var(--space-12) * 5 + var(--space-2));
+  --menu-w: calc(var(--space-8) * 4 + var(--space-3)); /* 140 */
+  --cell-h: calc(var(--space-12) + var(--space-1)); /* 52：月历格子 */
+  /* 让 flash 落在「+ 记一件」与底栏之上：底栏约 33 + 记一件约 36 + 气口 */
+  --flash-y: calc(var(--space-12) + var(--space-8)); /* 80 */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #0c1012;
-    --sheet: #14191c;
-    --surface: #1c2226;
+    color-scheme: dark;
 
-    --ink: #e2e8ea;
-    --ink-muted: #95a1a6;
-    --ink-faint: #6b7579;
+    --bg: #0b1220;
+    --surface: #101a2b;
+    --surface-warm: #142034;
 
-    --rule: #242c30;
-    --rule-strong: #384349;
+    --fg: #eef3f8;
+    --fg-2: #c8d3e2;
+    --muted: #9aa9bd;
+    --ink-faint: #7b8a9f;
 
-    --indigo: #82b0d8;
-    --indigo-soft: rgba(130, 176, 216, 0.12);
-    --indigo-line: rgba(130, 176, 216, 0.34);
-    --indigo-wash: rgba(130, 176, 216, 0.17);
-    /* 深色下靛蓝是亮蓝，压在上面的字得是墨色 —— 不然是浅字压亮底 */
-    --on-indigo: #0b0f12;
-    /* 大块面压到中靛：亮蓝铺满一屏会晃眼，而这个应用夜里也开着。
-       --on-slab 和浅色同值，理由见浅色块里的注释 */
-    --slab: #2b5175;
+    --border: #223049;
+    --rule-strong: color-mix(in oklab, var(--fg), transparent 62%);
+
+    /*
+     * 深色下强调色翻成亮紫：它当字写在深底上要 6.88:1，
+     * 压在上面的字因此必须翻成墨色 —— 不然是浅字压亮底（2.7:1）。
+     */
+    --accent: #8f79ff;
+    --accent-hover: #a693ff;
+    --on-accent: #0b1220;
+    --accent-soft: color-mix(in oklab, var(--accent), transparent 78%);
+    --accent-wash: color-mix(in oklab, var(--accent), transparent 88%);
+    --accent-line: color-mix(in oklab, var(--accent), transparent 66%);
+    --danger: #ff8a9e;
+    --on-danger: #0b1220;
+    --danger-soft: color-mix(in oklab, var(--danger), transparent 82%);
+
+    /* 大块面压到深紫：亮紫铺满一屏会晃眼，而这个应用夜里也开着 */
+    --slab: #2a2f5e;
     --on-slab: #ffffff;
-    --stripe: rgba(226, 232, 234, 0.15);
 
-    --cinnabar: #e0685b;
-    --cinnabar-soft: rgba(224, 104, 91, 0.13);
+    --stripe: color-mix(in oklab, var(--fg), transparent 80%);
+    --graduation: color-mix(in oklab, var(--fg), transparent 78%);
 
-    --tick-none: #3d484d;
-
-    --graduation: rgba(226, 232, 234, 0.13);
-
-    --hover: rgba(130, 176, 216, 0.07);
-    --cursor-bg: rgba(130, 176, 216, 0.1);
-
-    --shadow-pop: 0 10px 28px rgba(0, 0, 0, 0.6);
+    --shadow-pop:
+      rgba(0, 0, 0, 0.5) 0 6px 16px -6px,
+      rgba(0, 0, 0, 0.6) 0 12px 28px -12px;
   }
 }

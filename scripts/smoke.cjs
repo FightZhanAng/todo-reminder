@@ -453,7 +453,7 @@ async function mainWindowPass() {
   ok('三个按钮：最小化 / 最大化 / 关闭', band.labels.join('/') === '最小化/最大化/关闭', band.labels)
   ok('整条是拖动区，按钮从中挖了 no-drag 出来', band.region === 'drag' && band.btnRegion === 'no-drag', band)
   ok('按钮 42 宽（原生 caption 的 46 在 420 窄窗里挤掉了标题）', band.btnWidth === 42, band)
-  ok('字形用第三级灰 --ink-faint', band.glyph === 'rgb(135, 146, 154)', band.glyph)
+  ok('字形用第三级灰 --ink-faint', band.glyph === 'rgb(127, 141, 160)', band.glyph)
 
   sentWindowActions = []
   for (const i of [0, 1, 2]) {
@@ -513,10 +513,10 @@ async function mainWindowPass() {
   // 表头那句「20:53 · 还剩 4 件 逾期 3」换成了读数带：三格铭牌标签 + 等宽读数
   ok('读数带报逾期数', board.late === '1', board.late)
 
-  // 量尺：刻度长度编码紧迫度（7 / 13 / 24px），这里只有一件逾期、没有「快到了」。
-  // 逾期那根还要**越过轴向左伸出 7px**，所以它在时刻列里也占一格
+  // 量尺：刻度长度编码紧迫度（8 / 12 / 20px），这里只有一件逾期、没有「快到了」。
+  // 逾期那根还要**越过轴向左伸出 4px**，所以它在时刻列里也占一格
   ok('刻度按紧迫度分档', board.ticks.join('/') === 'overdue/none/none/none', board.ticks)
-  ok('刻度长度跟着档位变', board.tickW[0] === '24px' && board.tickW[1] === '7px', board.tickW)
+  ok('刻度长度跟着档位变', board.tickW[0] === '20px' && board.tickW[1] === '8px', board.tickW)
   // 竖轴要是一根**通到底**的线：每一行的刻度列必须在同一个 x 上。
   // 「今天随时」那一段的行没有时刻，靠的是时刻列恒定占位撑住 —— 这条就是它的守卫
   ok('竖轴逐行对齐（含无时刻的段）', new Set(board.tickLeft).size === 1, board.tickLeft)
@@ -562,7 +562,7 @@ async function mainWindowPass() {
     label: document.querySelectorAll('.head__actions .iconbutton')[2].getAttribute('aria-label')
   }))()`)
   ok('themeSource=dark 时渲染层的 prefers-color-scheme 跟着变', dark.matched === true, dark)
-  ok('深色下底纸用的是深色 token', dark.paper === 'rgb(12, 16, 18)', dark.paper)
+  ok('深色下底纸用的是深色 token', dark.paper === 'rgb(11, 18, 32)', dark.paper)
   ok('开关的文案也跟着翻面', dark.label === '切到浅色', dark.label)
 
   nativeTheme.themeSource = 'light'
@@ -571,8 +571,8 @@ async function mainWindowPass() {
     paper: getComputedStyle(document.body).backgroundColor,
     ink: getComputedStyle(document.body).color
   }))()`)
-  ok('浅色下底纸用的是浅色 token', light.paper === 'rgb(228, 231, 233)', light.paper)
-  ok('浅色的字是深色（不是白字压白底）', light.ink === 'rgb(18, 24, 28)', light.ink)
+  ok('浅色下底纸用的是浅色 token', light.paper === 'rgb(255, 255, 255)', light.paper)
+  ok('浅色的字是深色（不是白字压白底）', light.ink === 'rgb(6, 27, 49)', light.ink)
   nativeTheme.themeSource = 'system'
 
   // 托盘菜单那条 main → renderer 的切视图链路
@@ -610,7 +610,7 @@ async function mainWindowPass() {
   // 三个都叫「· N 件」的入口挨在一起会读成一句话，中间那条细竖线必须真的渲染出来。
   // 竖线挂在每个按钮自己的 ::before 上，所以按钮矩形之间的 gap 只是 flex 间距，
   // 实际留白 = gap + 1(线) + margin-right(10)
-  ok('入口之间都有分隔线', entries.seps[1] === '9px' && entries.seps[2] === '9px' && entries.gap >= 9, entries)
+  ok('入口之间都有分隔线', entries.seps[1] === '8px' && entries.seps[2] === '8px' && entries.gap >= 8, entries)
   ok('三个入口在 420 宽里放得下', entries.fits === true, entries)
 
   // ---- 以后这本账 ----
@@ -1260,7 +1260,7 @@ async function mainWindowPass() {
   ok('首尾补了邻月的日子（能点到 10 月 1 号）', cal.out > 0, cal.out)
   ok('三个月历常用入口', cal.chips.join('/') === '今天/明天/下周一', cal.chips)
   ok('触发按钮上写着相对日', cal.rel === '今天', cal.rel)
-  ok('月份标题是汉字月', /^\d{4} 年 .月$/.test(cal.title || ''), cal.title)
+  ok('月份标题是汉字月', /^\d{4} 年 [正一二三四五六七八九十冬腊]{1,3}月$/.test(cal.title || ''), cal.title)
 
   // 点「明天」：值要变、浮层要关、按钮上的字要跟着变
   await evalIn(win, `[...document.querySelectorAll('.cal__chip')][1].click(), 'ok'`)

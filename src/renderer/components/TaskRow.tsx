@@ -162,6 +162,7 @@ export function TaskRow({
         onClick={() => state.go({ name: 'edit', id: task.id, kind: task.kind })}
         role="button"
         tabIndex={-1}
+        aria-label={`改一改${task.title}`}
       >
         {/* 「重要」不在这里加标记 —— 它只改 .row--important 上的字重 */}
         {/* 墨线要贴的是**字**的宽度，而 .row__title 是 flex:1 撑满整行的盒子：
