@@ -1,6 +1,6 @@
 {
   "name": "todo-reminder",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "description": "桌面待办提醒 —— 通知直接办、今日与以后分开、错过的必须补上",
   "author": "tomcato",
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:core": "tsc -p tsconfig.test.json && node .tmp-test/scripts/core-test.js",
     "icons": "tsc -p tsconfig.test.json && node .tmp-test/scripts/make-icons.js",
-    "smoke": "electron scripts/smoke.cjs",
+    "smoke": "node scripts/run-electron.cjs scripts/smoke.cjs",
     "dist": "electron-vite build && node scripts/dist.mjs --win --publish never",
     "dist:mac": "electron-vite build && node scripts/dist.mjs --mac --publish never"
   },
