@@ -1,0 +1,2370 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>待办UI重构原型 · REQ-S31-03</title>
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+ * 令牌层 —— design-systems/stripe 的 :root 块，逐字内联（与 kit.html 同构）
+ * 下面所有样式只引用 var(--token)，不出现 palette 之外的颜色、字号、间距。
+ * ─────────────────────────────────────────────────────────────────── */
+:root {
+  --bg:           #ffffff;
+  --surface:      #ffffff;
+  --surface-warm: #f6f9fc;
+
+  --fg:    #061b31;
+  --fg-2:  #273951;
+  --muted: #64748d;
+  --meta:  var(--muted);
+
+  --border:      #e5edf5;
+  --border-soft: var(--border);
+
+  --accent:    #533afd;
+  --accent-on: #ffffff;
+  --accent-hover:  #4434d4;
+  --accent-active: #2e2b8c;
+
+  --success: #15be53;
+  --warn:    #9b6829;
+  --danger:  #ea2261;
+
+  --font-display:
+    "sohne-var", "Söhne", "Sohne",
+    "SF Pro Display", -apple-system, BlinkMacSystemFont,
+    system-ui, "Helvetica Neue", Arial, sans-serif;
+  --font-body:
+    "sohne-var", "Söhne", "Sohne",
+    "SF Pro Display", -apple-system, BlinkMacSystemFont,
+    system-ui, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    "SourceCodePro", "Source Code Pro",
+    ui-monospace, "SF Mono", "JetBrains Mono",
+    Menlo, Monaco, Consolas, monospace;
+
+  --text-xs:   12px;
+  --text-sm:   14px;
+  --text-base: 16px;
+  --text-lg:   18px;
+  --text-xl:   22px;
+  --text-2xl:  32px;
+  --text-3xl:  48px;
+  --text-4xl:  56px;
+
+  --leading-body:     1.40;
+  --leading-tight:    1.10;
+  --tracking-display: -0.02em;
+
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-12: 48px;
+
+  --section-y-desktop: 96px;
+  --section-y-tablet:  64px;
+  --section-y-phone:   40px;
+
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-pill: 9999px;
+
+  --elev-flat:   none;
+  --elev-ring:   0 0 0 1px var(--border);
+  --elev-raised:
+    rgba(50, 50, 93, 0.25)  0px 30px 45px -30px,
+    rgba(0,   0,  0, 0.10)  0px 18px 36px -18px;
+
+  --focus-ring:
+    0 0 0 2px var(--accent),
+    0 0 0 5px color-mix(in oklab, var(--accent), transparent 75%);
+
+  --motion-fast:   150ms;
+  --motion-base:   200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  --container-max:            1080px;
+  --container-gutter-desktop: 32px;
+  --container-gutter-tablet:  24px;
+  --container-gutter-phone:   16px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * 派生层 —— 全部由上面的令牌算出（color-mix / calc），不新写一个色值。
+ * 对应原项目的 --indigo-soft / --graduation / --stripe / --shadow-pop 等。
+ * ─────────────────────────────────────────────────────────────────── */
+:root {
+  --accent-soft:   color-mix(in oklab, var(--accent), transparent 92%);   /* hover 底 */
+  --accent-wash:   color-mix(in oklab, var(--accent), transparent 95%);   /* 成片的淡底 */
+  --accent-line:   color-mix(in oklab, var(--accent), transparent 70%);
+  --danger-soft:   color-mix(in oklab, var(--danger), transparent 92%);
+  --graduation:    color-mix(in oklab, var(--fg), transparent 88%);       /* 小刻度 */
+  --stripe:        color-mix(in oklab, var(--fg), transparent 86%);       /* 调休斜纹 */
+  --rule-strong:   color-mix(in oklab, var(--fg), transparent 72%);
+
+  /* 量尺几何：整条界面只有这一组数，两个伪元素与段标签都由它推 */
+  --cursor-w: var(--space-1);
+  --clock-w:  var(--space-12);
+  --tick-w:   var(--space-4);
+  --ruler-x:  calc(var(--cursor-w) + var(--clock-w));
+  --label-pad: calc(var(--ruler-x) + var(--space-4));
+  --grad-pitch:       var(--space-1);
+  --grad-len:         var(--space-1);
+  --grad-major-pitch: var(--space-5);
+  --grad-major-len:   var(--space-2);
+  --tick-idle:  var(--space-2);
+  --tick-soon:  var(--space-3);
+  --tick-over:  var(--space-5);
+
+  /* 字距：kit 只给了 --tracking-display（大字标题用的负字距）。
+     这套界面另有「仪表铭牌」那一头的正字距，命名成四档角色，
+     免得在十几处选择器里各写各的字面量。 */
+  --tracking-plate:  0.20em;   /* 月份 / 段标签 / 读数标签 / 组名 */
+  --tracking-title:  0.14em;   /* 覆盖式视图的标题、空态主句 */
+  --tracking-quiet:  0.08em;   /* 星期 / 空态提示 / 月历月份 */
+  --tracking-button: 0.06em;   /* 实底按钮 */
+
+  /* 组件几何：一律由 --space-* 推出来，不写裸像素。
+     （1px / 2px 的发丝线与描边宽度不算在这里 —— 那是线宽，不是间距。） */
+  --hair:        calc(var(--space-1) / 2);              /* 2px 的加粗笔画 */
+  /* 全页唯一那块「实心读数板」（倒计时 hero）。它不取强调色 —— 强调色是说
+     「按我」的，这块只是读数；深浅两套都偏深，所以压在上面的字恒为 --accent-on。 */
+  --slab:        var(--fg);
+  --on-slab:     var(--accent-on);
+  --device-h:    calc(var(--space-12) * 15);            /* 720 客户区高 */
+  --field-label: calc(var(--space-12) + var(--space-4) + var(--space-1));
+  --num-w:       calc(var(--space-12) + var(--space-4) + var(--space-1));
+  --time-w:      calc(var(--space-12) + var(--space-8) + var(--space-1));
+  --pop-w:       calc(var(--space-12) * 5 + var(--space-2));  /* 230 的月历（7×32 + 6 缝）+ 左右 8 气口 + 描边 */
+  --menu-w:      calc(var(--space-8) * 4 + var(--space-3));
+  --mini-w:      calc(var(--space-12) * 6 + var(--space-8));
+  --cell-h:      calc(var(--space-12) + var(--space-1));
+  --flash-y:     calc(var(--space-12) + var(--space-8));  /* 让 flash 落在「+ 记一件」与底栏之上 */
+}
+
+/* 深色主题：同样只做派生，不引入新色相 */
+.device[data-theme="dark"] {
+  --bg:           color-mix(in oklab, var(--fg-2), black 82%);
+  --surface:      color-mix(in oklab, var(--fg-2), black 76%);
+  --surface-warm: color-mix(in oklab, var(--fg-2), black 70%);
+  --fg:        var(--accent-on);
+  --fg-2:      color-mix(in oklab, var(--accent-on), transparent 14%);
+  --muted:     color-mix(in oklab, var(--accent-on), transparent 38%);
+  --border:    color-mix(in oklab, var(--accent-on), transparent 88%);
+  --rule-strong: color-mix(in oklab, var(--accent-on), transparent 62%);
+  --graduation:  color-mix(in oklab, var(--accent-on), transparent 78%);
+  --stripe:      color-mix(in oklab, var(--accent-on), transparent 80%);
+  --accent-soft: color-mix(in oklab, var(--accent), transparent 74%);
+  --accent-wash: color-mix(in oklab, var(--accent), transparent 84%);
+  --danger-soft: color-mix(in oklab, var(--danger), transparent 80%);
+  /* 深色下 --fg 翻成了浅色，--slab 必须跟着重定：它靠的是「深底 + 浅字」这一对，
+     跟着 --fg 走会变成白底白字。这里压深一档强调色，仍不引入新色相。 */
+  --slab:        color-mix(in oklab, var(--accent), var(--bg) 55%);
+  --on-slab:     var(--accent-on);
+  --elev-ring: 0 0 0 1px var(--border);
+}
+
+/* ─── 基础 ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+/* 作者层的 display 会盖掉浏览器默认的 [hidden]，而这张图里有好几处靠 hidden 收字段
+   （「按哪个历」那一格就是 .field { display: flex }）。统一兜一次，别在每个组件上补。 */
+[hidden] { display: none !important; }
+html { -webkit-font-smoothing: antialiased; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: 300;
+  line-height: var(--leading-body);
+  font-feature-settings: "ss01";
+}
+h1, h2, h3, p, dl, dd, dt, ul, li { margin: 0; padding: 0; }
+ul { list-style: none; }
+button {
+  font: inherit;
+  font-weight: 400;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-feature-settings: "ss01";
+}
+input, textarea {
+  font: inherit;
+  font-weight: 300;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-feature-settings: "ss01";
+}
+input::placeholder, textarea::placeholder { color: var(--muted); }
+textarea { resize: vertical; font-family: var(--font-body); }
+:where(button, a, input, textarea):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.mono { font-family: var(--font-mono); font-feature-settings: "tnum"; }
+.glyph { display: block; }
+
+/* ─── 原型外框（页头 / 两栏 / 右栏） ────────────────────────────────── */
+.stage {
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: var(--section-y-tablet) var(--container-gutter-desktop) var(--section-y-desktop);
+}
+.proto { margin-bottom: var(--space-8); }
+.proto__eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-display);
+  color: var(--accent);
+  margin-bottom: var(--space-3);
+}
+.proto__title {
+  font-size: var(--text-3xl);
+  font-weight: 300;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-display);
+}
+.proto__lede {
+  margin-top: var(--space-3);
+  max-width: 62ch;
+  font-size: var(--text-lg);
+  font-weight: 300;
+  color: var(--muted);
+}
+.proto__grid {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: start;
+}
+@media (max-width: 1024px) {
+  .proto__grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.rail { position: sticky; top: var(--space-6); display: grid; gap: var(--space-6); }
+.rail__card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-raised);
+  padding: var(--space-5);
+}
+.rail__label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-display);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: var(--space-3);
+}
+.navlist { display: grid; gap: var(--space-1); }
+.navlist__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+  text-align: left;
+  transition: background var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard);
+}
+.navlist__item:hover { background: var(--accent-soft); color: var(--accent); }
+.navlist__item[aria-current="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+.navlist__idx { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); }
+.navlist__note { margin-left: auto; font-size: var(--text-xs); color: var(--muted); }
+.facts { display: grid; gap: var(--space-3); font-size: var(--text-sm); color: var(--muted); }
+.facts dt { color: var(--fg); font-weight: 400; }
+.facts code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-2);
+}
+.swatches { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.swatch { width: var(--space-8); }
+.swatch__chip {
+  height: var(--space-8);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.swatch__name {
+  display: block;
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ─── 设备框 ───────────────────────────────────────────────────────── */
+.device {
+  position: relative;
+  /* 416px ≈ 真应用的 420 客户区（窄窗是这套布局的判据，别放宽） */
+  width: calc(var(--space-12) * 8 + var(--space-8));
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-raised);
+  overflow: hidden;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  transition: background var(--motion-base) var(--ease-standard);
+}
+.device__caption {
+  margin-top: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.app { display: flex; flex-direction: column; height: var(--device-h); background: var(--surface); }
+
+/* ─── 标题带（画出来的，不带下边线） ───────────────────────────────── */
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  flex: none;
+}
+.titlebar__title { font-size: var(--text-xs); color: var(--muted); letter-spacing: var(--tracking-display); }
+.titlebar__win { margin-left: auto; display: flex; }
+.winbtn {
+  width: var(--space-12);
+  height: var(--space-8);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  transition: background var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard);
+}
+.winbtn:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* ─── 提示条 ───────────────────────────────────────────────────────── */
+.noticebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  border-left: var(--space-1) solid var(--accent);
+  background: var(--accent-soft);
+  font-size: var(--text-xs);
+  flex: none;
+}
+.noticebar--error { border-left-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+.noticebar__text { flex: 1; }
+.noticebar__action { color: var(--accent); text-decoration: underline; }
+.noticebar--error .noticebar__action { color: inherit; }
+.noticebar__more { color: var(--muted); }
+.noticebar__close { width: var(--space-5); color: var(--muted); }
+.noticebar__close:hover { color: var(--fg); }
+
+/* ─── 表头：日期铭牌 + 分段控件 + 读数带 ───────────────────────────── */
+.head {
+  flex: none;
+  padding: var(--space-2) var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+  animation: fade-rise var(--motion-base) var(--ease-standard) both;
+}
+.head__top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.dateline { display: flex; align-items: baseline; gap: var(--space-2); }
+.dateline__month { font-size: var(--text-xs); letter-spacing: var(--tracking-plate); color: var(--muted); }
+.dateline__day {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  font-size: var(--text-2xl);
+  font-weight: 300;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-display);
+}
+.dateline__dow { font-size: var(--text-xs); letter-spacing: var(--tracking-quiet); color: var(--fg-2); }
+
+.head__actions {
+  display: flex;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+.iconbutton {
+  width: var(--space-8);
+  height: var(--space-8);
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--fg-2);
+  transition: background var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard);
+}
+.head__actions .iconbutton + .iconbutton { border-left: 1px solid var(--border); }
+.iconbutton:hover { background: var(--accent-soft); color: var(--accent); }
+.iconbutton--solid { background: var(--accent); color: var(--accent-on); }
+.iconbutton--solid:hover { background: var(--accent-hover); color: var(--accent-on); }
+
+.readout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--border);
+  margin-top: var(--space-2);
+}
+.readout__cell {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) 0 var(--space-2);
+}
+.readout__cell + .readout__cell { padding-left: var(--space-3); border-left: 1px solid var(--border); }
+.readout__label { font-size: var(--text-xs); letter-spacing: var(--tracking-plate); color: var(--muted); }
+.readout__value {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  font-size: var(--text-lg);
+  font-weight: 300;
+  letter-spacing: var(--tracking-display);
+  color: var(--fg);
+}
+.head__late .readout__label, .head__late .readout__value { color: var(--danger); }
+
+/* ─── 看板主体与量尺 ───────────────────────────────────────────────── */
+.board { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: var(--space-3); }
+.section { padding-bottom: var(--space-1); }
+.section__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-1) var(--label-pad);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-plate);
+  color: var(--muted);
+  animation: fade-rise var(--motion-base) var(--ease-standard) both;
+}
+.section__label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.section__count { font-family: var(--font-mono); font-feature-settings: "tnum"; color: var(--fg-2); }
+.section--overdue .section__label { color: var(--danger); }
+
+.rows { position: relative; }
+/* 一根轴 + 两级分格：小格每 4px 一道长 4px，主格每 20px 一道长 8px */
+.rows::before {
+  content: "";
+  position: absolute;
+  left: var(--ruler-x);
+  top: 0;
+  bottom: 0;
+  width: var(--tick-w);
+  background:
+    repeating-linear-gradient(to bottom,
+      var(--border) 0 var(--grad-major-len), transparent var(--grad-major-len) var(--grad-major-pitch)),
+    repeating-linear-gradient(to bottom,
+      var(--graduation) 0 var(--grad-len), transparent var(--grad-len) var(--grad-pitch));
+  background-repeat: no-repeat, repeat-y;
+}
+.rows::after {
+  content: "";
+  position: absolute;
+  left: var(--ruler-x);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule-strong);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: var(--space-8);
+  padding-right: var(--space-3);
+  animation: fade-in var(--motion-base) var(--ease-standard) both;
+}
+/* 行只做 opacity：带 transform 的祖先会成为 fixed 菜单的包含块 */
+.row:nth-child(1) { animation-delay: 50ms; }
+.row:nth-child(2) { animation-delay: 95ms; }
+.row:nth-child(3) { animation-delay: 140ms; }
+.row:nth-child(4) { animation-delay: 185ms; }
+.row:nth-child(n+5) { animation-delay: 230ms; }
+.row:hover { background: var(--surface-warm); }
+.row--cursor { background: var(--accent-wash); }
+.row--highlight { background: var(--accent-soft); }
+.row--removed { opacity: 0.5; }
+.row--exiting { pointer-events: none; opacity: 0; transition: opacity var(--motion-base) var(--ease-standard); }
+
+.row__cursor { width: var(--cursor-w); align-self: stretch; }
+.row--cursor .row__cursor { background: var(--accent); }
+.row__clock {
+  width: var(--clock-w);
+  padding-left: var(--space-2);
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-display);
+  color: var(--muted);
+}
+.row[data-urgency="soon"] .row__clock { color: var(--accent); }
+.row[data-urgency="overdue"] .row__clock { color: var(--danger); }
+
+.row__tick { position: relative; width: var(--tick-w); align-self: stretch; }
+.row__tick::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: var(--tick-idle);
+  height: 1px;
+  background: var(--graduation);
+}
+.row[data-urgency="soon"] .row__tick::after { width: var(--tick-soon); height: var(--hair); background: var(--accent); }
+.row[data-urgency="overdue"] .row__tick::after {
+  left: calc(var(--space-1) * -1);
+  width: var(--tick-over);
+  height: var(--hair);
+  background: var(--danger);
+}
+
+.row__dot {
+  position: relative;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin: 0 var(--space-2);
+  flex: none;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              background var(--motion-fast) var(--ease-standard);
+}
+.row__dot:hover { border-color: var(--accent); }
+.row__dot--on { background: var(--accent); border-color: var(--accent); }
+.row__dot--on::after {
+  content: "";
+  position: absolute;
+  left: var(--space-1);
+  top: calc(var(--hair) * 2);
+  width: var(--space-1);
+  height: calc(var(--space-1) * 2);
+  border: 0 solid var(--accent-on);
+  border-width: 0 var(--hair) var(--hair) 0;
+  transform: rotate(40deg);
+}
+.row__title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row--important .row__title { font-weight: 400; color: var(--fg); }
+.row--important .row__title::before { content: "▲ "; color: var(--accent); font-size: var(--text-xs); }
+.row--settled .row__title { color: var(--muted); }
+.row__title-text { position: relative; }
+.row--settled .row__title-text::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 50%;
+  height: 1px;
+  background: var(--fg-2);
+}
+.row__streak {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  font-size: var(--text-xs);
+  color: var(--muted);
+  padding-left: var(--space-2);
+}
+.row__today {
+  margin: 0 var(--space-2);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--fg-2);
+}
+.row__undo {
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--accent);
+}
+.row__more {
+  width: var(--space-6);
+  height: var(--space-6);
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.row:hover .row__more, .row--cursor .row__more, .row__more[aria-expanded="true"] { opacity: 1; }
+.row__more:hover { color: var(--accent); }
+
+/* ─── 空态（横放的一小截尺） ───────────────────────────────────────── */
+.empty {
+  padding: var(--space-12) var(--space-5) 0;
+  text-align: center;
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-title);
+  color: var(--muted);
+}
+.empty--tight { padding-top: var(--space-6); }
+.empty::before {
+  content: "";
+  display: block;
+  width: var(--space-12);
+  height: var(--space-2);
+  margin: 0 auto var(--space-4);
+  background:
+    repeating-linear-gradient(to right,
+      var(--rule-strong) 0 var(--space-2), transparent var(--space-2) var(--grad-major-pitch)),
+    repeating-linear-gradient(to right,
+      var(--graduation) 0 var(--space-1), transparent var(--space-1) var(--grad-pitch));
+  background-repeat: no-repeat, repeat-x;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.empty__hint { margin-top: var(--space-2); font-size: var(--text-xs); letter-spacing: var(--tracking-quiet); }
+
+/* ─── 快速添加 / 新建入口 ──────────────────────────────────────────── */
+.addbar { display: flex; justify-content: center; padding: var(--space-1) var(--space-3); flex: none; }
+.addbar__button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: var(--space-12);
+  padding: var(--space-1) var(--space-3);
+  background: var(--accent);
+  color: var(--accent-on);
+  border-radius: var(--radius-sm);
+  letter-spacing: var(--tracking-button);
+  font-size: var(--text-sm);
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+.addbar__button:hover { background: var(--accent-hover); }
+.addbar__key {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 0 var(--space-1);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  opacity: 0.65;
+}
+.quickadd {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-warm);
+  flex: none;
+}
+.quickadd__title { width: 100%; font-size: var(--text-sm); }
+.quickadd__row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.quickadd__btn {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard);
+}
+.quickadd__btn:hover { border-color: var(--accent); color: var(--accent); }
+.quickadd__btn--primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.quickadd__btn--primary:hover { background: var(--accent-hover); color: var(--accent-on); }
+.quickadd__sep { flex: 1; }
+.quickadd__time { width: var(--time-w); }
+
+/* ─── 底栏 ─────────────────────────────────────────────────────────── */
+.bottombar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  flex: none;
+}
+.bottombar__links { display: flex; align-items: center; gap: var(--space-3); }
+.bottombar__links > * + * { position: relative; padding-left: var(--space-3); }
+.bottombar__links > * + *::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: var(--space-2);
+  background: var(--rule-strong);
+}
+.bottombar__link:hover { color: var(--accent); }
+.bottombar__state--off { color: var(--danger); }
+.bottombar__danger { color: var(--danger); }
+.bottombar__danger:hover { text-decoration: underline; }
+
+/* ─── 覆盖式视图（设置 / 日历 / 倒计时 / 编辑器） ─────────────────── */
+.view { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.view--on { display: flex; }
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.topbar__lead { display: flex; align-items: center; gap: var(--space-2); }
+.topbar__title { font-size: var(--text-lg); font-weight: 300; letter-spacing: var(--tracking-title); }
+.topbar__date { font-size: var(--text-xs); color: var(--muted); }
+.topbar__button {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard);
+}
+.topbar__button:hover { border-color: var(--accent); color: var(--accent); }
+.topbar__button--primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.topbar__button--primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-on); }
+.page { flex: 1; min-height: 0; overflow-y: auto; }
+.page__body { padding: var(--space-1) var(--space-3) var(--space-5); }
+.page__foot { display: flex; align-items: center; gap: var(--space-4); padding-top: var(--space-2); }
+.linkbutton { font-size: var(--text-sm); color: var(--muted); text-decoration: underline; }
+.linkbutton:hover { color: var(--accent); }
+
+.group__label {
+  margin-top: var(--space-4);
+  padding: var(--space-3) 0 var(--space-1);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-plate);
+  color: var(--muted);
+}
+.group__label:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.field:last-child { border-bottom: 0; }
+.field--stack { display: grid; gap: var(--space-2); align-items: start; }
+.field__label { width: var(--field-label); flex: none; font-size: var(--text-sm); color: var(--muted); }
+.field--stack .field__label { width: auto; }
+.field__control { flex: 1; display: flex; align-items: center; gap: var(--space-2); }
+.field__control input, .field__control textarea { flex: 1; min-width: 0; }
+.field__control--row { flex-wrap: wrap; }
+.field__hint { font-size: var(--text-xs); color: var(--muted); line-height: var(--leading-body); }
+.field__hint--warn { color: var(--danger); }
+.field__control--row input[type="number"] { width: var(--num-w); flex: none; font-family: var(--font-mono); font-feature-settings: "tnum"; }
+.unit { font-size: var(--text-xs); color: var(--muted); }
+.path { font-family: var(--font-mono); font-size: var(--text-xs); word-break: break-all; }
+.check { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.check input { width: auto; flex: none; accent-color: var(--accent); }
+
+.segmented {
+  display: inline-flex;
+  gap: 1px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--rule-strong);
+  overflow: hidden;
+}
+.segmented__item { padding: var(--space-1) var(--space-3); background: var(--surface); font-size: var(--text-sm); }
+.segmented__item:hover { background: var(--accent-soft); color: var(--accent); }
+.segmented__item--on { background: var(--accent); color: var(--accent-on); }
+.segmented__item--on:hover { background: var(--accent-hover); color: var(--accent-on); }
+.daygrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--rule-strong); border: 1px solid var(--rule-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.daygrid__item { height: var(--space-6); background: var(--surface); font-family: var(--font-mono); font-feature-settings: "tnum"; font-size: var(--text-xs); }
+.daygrid__item:hover { background: var(--accent-soft); color: var(--accent); }
+.daygrid__item--on { background: var(--accent); color: var(--accent-on); }
+
+/* ─── 日历 ─────────────────────────────────────────────────────────── */
+.cal__head { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) 0; }
+.cal__title { font-family: var(--font-mono); font-size: var(--text-sm); letter-spacing: var(--tracking-quiet); }
+.cal__nav { width: var(--space-6); height: var(--space-6); color: var(--muted); }
+.cal__nav:hover { color: var(--accent); }
+.cal__dows { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; padding-bottom: var(--space-1); }
+.cal__dow { text-align: center; font-size: var(--text-xs); color: var(--muted); }
+.cal__dow--rest { color: var(--fg-2); }
+.monthgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+.monthcell {
+  position: relative;
+  isolation: isolate;
+  height: var(--cell-h);
+  padding: var(--space-1) var(--space-1) var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  text-align: left;
+  overflow: hidden;
+}
+.monthcell:hover { outline: 1px solid var(--rule-strong); outline-offset: -1px; }
+.monthcell--out { background: var(--surface-warm); }
+.monthcell--rest::after {
+  content: "";
+  position: absolute;
+  inset: 0 -1px;
+  z-index: -1;
+  background: var(--accent-wash);
+}
+.monthcell--work {
+  background-image: repeating-linear-gradient(45deg,
+    var(--stripe) 0 1px, transparent 1px var(--space-1));
+}
+.monthcell--late::before {
+  content: "";
+  position: absolute;
+  left: var(--hair);
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: var(--hair);
+  background: var(--danger);
+}
+.monthcell--on { outline: var(--hair) solid var(--accent); outline-offset: calc(var(--hair) * -1); }
+.monthcell__top { display: flex; align-items: center; gap: var(--space-1); min-height: var(--space-3); }
+.monthcell__day { font-family: var(--font-mono); font-feature-settings: "tnum"; font-size: var(--text-xs); color: var(--fg); }
+.monthcell--out .monthcell__day { color: var(--muted); }
+.monthcell--rest .monthcell__day { color: var(--accent); }
+.monthcell--work .monthcell__day { color: var(--fg); font-weight: 400; }
+.monthcell--today .monthcell__day {
+  min-width: var(--space-4);
+  padding: 0 var(--space-1);
+  background: var(--accent);
+  color: var(--accent-on);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+.monthcell__badge { font-size: var(--text-xs); color: var(--accent); }
+.monthcell__badge--work { color: var(--fg-2); }
+.monthcell__label {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.monthcell--out .monthcell__label { color: var(--muted); }
+.monthcell--rest .monthcell__label { color: var(--fg); }
+.monthcell__label--term { color: var(--accent); }
+.monthcell__dots { position: absolute; right: var(--space-1); bottom: var(--space-1); display: flex; gap: var(--hair); align-items: center; }
+/* 方点不是圆点：仪器上的指示格不做圆的（全界面只有一档小圆角） */
+.monthdot { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-sm); background: var(--accent); }
+.monthcell__dots[data-late="1"] .monthdot { background: var(--danger); }
+.monthcell__more { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--danger); }
+.cal__note {
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-warm);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.cal__note-link { margin-left: var(--space-2); }
+
+.daycard {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--elev-ring);
+}
+.daycard__head { border-bottom: 1px solid var(--border); padding-bottom: var(--space-2); }
+.daycard__line { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
+.daycard__date { font-family: var(--font-mono); font-feature-settings: "tnum"; font-size: var(--text-lg); letter-spacing: var(--tracking-display); }
+.daycard__dow { font-size: var(--text-xs); color: var(--fg-2); }
+.daycard__chip {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--accent);
+}
+.daycard__meta { margin-top: var(--space-1); display: flex; gap: var(--space-2); font-size: var(--text-xs); color: var(--muted); }
+.daycard__empty { padding: var(--space-4) 0; font-size: var(--text-sm); color: var(--muted); }
+.daycard__foot { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--border); }
+.daycard__add { font-size: var(--text-sm); color: var(--accent); }
+.daycard__add:hover { text-decoration: underline; }
+
+/* ─── 倒计时 ───────────────────────────────────────────────────────── */
+/* hero 在真应用里走 --slab / --on-slab 那一对实心墨块，刻意不取强调色 ——
+   强调色是说「按我」的，这块只是读数。这里对应 Stripe 的深海军蓝面板：
+   底用 --fg，字用 --accent-on，不引入第三个色相。 */
+.hero {
+  padding: var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--slab);
+  color: var(--on-slab);
+  box-shadow: var(--elev-raised);
+}
+.hero__label { font-size: var(--text-xs); letter-spacing: var(--tracking-plate); opacity: 0.8; }
+.hero__name { margin-top: var(--space-2); font-size: var(--text-xl); font-weight: 300; letter-spacing: var(--tracking-display); }
+.hero__days { display: flex; align-items: baseline; gap: var(--space-2); margin-top: var(--space-3); }
+/* 真应用的天数是 34px；这套字号只有五档，取最接近的 --text-2xl（32）。 */
+.hero__num { font-family: var(--font-mono); font-feature-settings: "tnum"; font-size: var(--text-2xl); font-weight: 300; line-height: var(--leading-tight); letter-spacing: var(--tracking-display); }
+.hero__unit { font-size: var(--text-sm); opacity: 0.85; }
+.hero__sub { margin-top: var(--space-2); font-size: var(--text-xs); opacity: 0.8; }
+.crow { border-bottom: 1px solid var(--border); }
+.crow__hit { display: block; width: 100%; text-align: left; padding: 0; }
+.crow__hit:hover .crow__title { color: var(--accent); }
+.crow__line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0; }
+.crow__title { font-size: var(--text-sm); }
+/* 天数是一枚软片：淡底 + 强调色字。到了那天换成实心（今天不是「晚了」，不借 danger）。 */
+.crow__days {
+  flex: none;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--accent-wash);
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+.crow__days[data-today="1"] { background: var(--accent); color: var(--accent-on); font-weight: 400; }
+.crow__sub { margin-top: var(--space-1); font-size: var(--text-xs); color: var(--muted); }
+.annform {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-warm);
+}
+.annform__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+.annform__title { font-size: var(--text-sm); color: var(--fg); }
+.annform__foot { display: flex; align-items: center; gap: var(--space-4); padding-top: var(--space-3); }
+
+/* ─── 浮层（日期 / 时刻 / 行菜单 / flash） ────────────────────────── */
+.anchor { position: relative; }
+.datefield {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+.datefield:hover { border-color: var(--accent); }
+.datefield__dow { font-size: var(--text-xs); color: var(--muted); }
+.datefield__rel { font-size: var(--text-xs); color: var(--accent); }
+.datefield__caret { color: var(--muted); }
+.popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  width: var(--pop-w);
+  padding: var(--space-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--elev-raised);
+  animation: pop-in var(--motion-fast) var(--ease-standard) both;
+}
+.cal__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; margin-top: var(--space-1); }
+.cal__cell {
+  height: var(--space-6);   /* 真应用是 28px，不在这套间距档上；取最近的 24 */
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  font-size: var(--text-xs);
+  color: var(--fg);
+}
+.cal__cell:hover { background: var(--accent-soft); color: var(--accent); }
+.cal__cell--out { color: var(--muted); }
+/* 今天是「哪一格是今天」→ 一圈细环；选中是「我挑了这格」→ 填墨。
+   两种语义不能都做成填色，否则点了之后分不清哪格是今天、哪格是选的。 */
+.cal__cell--today { box-shadow: inset 0 0 0 1px var(--accent-line); color: var(--accent); }
+.cal__cell--on, .cal__cell--on:hover { background: var(--fg); color: var(--surface); box-shadow: none; }
+.cal__quick { display: flex; gap: var(--space-1); margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--border); }
+.cal__chip {
+  flex: 1;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.cal__chip:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.timepick__label { font-size: var(--text-xs); letter-spacing: var(--tracking-plate); color: var(--muted); }
+.timepick__grid { display: grid; gap: 1px; margin-top: var(--space-2); }
+/* 时：4 列 6 行 = 24；分：3 列 4 行 = 12 档（5 分钟一档）*/
+.timepick__grid--h { grid-template-columns: repeat(4, 1fr); }
+.timepick__grid--m { grid-template-columns: repeat(3, 1fr); }
+.timepick__cell {
+  height: var(--space-6);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.timepick__cell:hover { background: var(--accent-soft); color: var(--accent); }
+.timepick__cell--on, .timepick__cell--on:hover { background: var(--fg); color: var(--surface); }
+.rowmenu {
+  position: fixed;
+  z-index: 30;
+  min-width: var(--menu-w);
+  padding: var(--space-1);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--elev-raised);
+  animation: pop-in var(--motion-fast) var(--ease-standard) both;
+}
+.rowmenu[hidden] { display: none; }
+.rowmenu__item {
+  display: block;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: var(--text-sm);
+}
+.rowmenu__item:hover { background: var(--accent-soft); color: var(--accent); }
+.rowmenu__item--danger { color: var(--danger); }
+.rowmenu__item--danger:hover { background: var(--danger-soft); color: var(--danger); }
+.flash { position: absolute; left: var(--space-2); right: var(--space-2); bottom: var(--flash-y); pointer-events: none; display: flex; justify-content: center; }
+.flash[hidden] { display: none; }
+.flash__inner {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-on);
+  font-size: var(--text-sm);
+  box-shadow: var(--elev-raised);
+  animation: pop-in var(--motion-base) var(--ease-standard) both;
+}
+.flash__inner--error { background: var(--danger); }
+.miniwin {
+  position: absolute;
+  z-index: 25;
+  top: var(--space-8);
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--mini-w);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--elev-raised);
+}
+.miniwin[hidden] { display: none; }
+.miniwin__bar { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--muted); }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-rise { from { opacity: 0; transform: translateY(var(--space-1)); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(calc(var(--space-1) * -1)); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-delay: 0ms !important; transition-duration: 0.001ms !important; }
+}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <header class="proto">
+    <div class="proto__eyebrow">REQ-S31-03 · 设计系统 Stripe · 单文件静态原型</div>
+    <h1 class="proto__title">待办 UI 重构原型</h1>
+    <p class="proto__lede">
+      把「今日账本」那套尺规结构搬进 Stripe 令牌：一根两级分格的量尺、一块三格读数带、
+      三本分开的账。左边是可点的原型（切换视图、勾选、打开行菜单、切深浅主题），
+      右边是视图索引与设计约束。
+    </p>
+  </header>
+
+  <main class="proto__grid">
+
+    <!-- ══════════════ 应用窗口 ══════════════ -->
+    <div>
+      <div class="device" id="device" data-theme="light">
+        <div class="app">
+
+          <!-- 标题带：画出来的，不带下边线 -->
+          <div class="titlebar">
+            <span class="titlebar__title">待办提醒</span>
+            <div class="titlebar__win">
+              <button class="winbtn" type="button" aria-label="最小化">
+                <svg class="glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8" stroke="currentColor" stroke-width="1"/></svg>
+              </button>
+              <button class="winbtn" type="button" aria-label="最大化">
+                <svg class="glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+              </button>
+              <button class="winbtn" type="button" aria-label="关闭">
+                <svg class="glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 提示条：错过了的提醒会补送 -->
+          <div class="noticebar" id="noticebar">
+            <span class="noticebar__text">有 2 件事错过了提醒</span>
+            <button class="noticebar__action" type="button">现在看看</button>
+            <span class="noticebar__more">还有 1 条</span>
+            <button class="noticebar__close" type="button" aria-label="这条不再提示" onclick="document.getElementById('noticebar').remove()">×</button>
+          </div>
+
+          <!-- ══════ 看板 ══════ -->
+          <section class="view view--on" data-view="board">
+            <header class="head">
+              <div class="head__top">
+                <div class="dateline">
+                  <span class="dateline__month" id="dl-month">10月</span>
+                  <span class="dateline__day" id="dl-day">14</span>
+                  <span class="dateline__dow" id="dl-dow">周三</span>
+                </div>
+                <div class="head__actions">
+                  <button class="iconbutton" type="button" aria-label="日历" title="日历" data-goto="calendar">
+                    <svg class="glyph" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.9" y="3.1" width="12.2" height="11" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="1.9" y1="6.5" x2="14.1" y2="6.5" stroke="currentColor" stroke-width="1.4"/><g stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><line x1="5.1" y1="1.5" x2="5.1" y2="3.9"/><line x1="10.9" y1="1.5" x2="10.9" y2="3.9"/></g><g fill="currentColor"><circle cx="5.2" cy="9.5" r="0.85"/><circle cx="8" cy="9.5" r="0.85"/><circle cx="10.8" cy="9.5" r="0.85"/><circle cx="5.2" cy="12" r="0.85"/><circle cx="8" cy="12" r="0.85"/></g></svg>
+                  </button>
+                  <button class="iconbutton" type="button" aria-label="倒计时" title="倒计时" data-goto="countdown">
+                    <svg class="glyph" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><line x1="3.6" y1="2.1" x2="12.4" y2="2.1"/><line x1="3.6" y1="13.9" x2="12.4" y2="13.9"/><path d="M5 2.1c0 3.1 3 3.7 3 5.9s-3 2.8-3 5.9"/><path d="M11 2.1c0 3.1-3 3.7-3 5.9s3 2.8 3 5.9"/></g><circle cx="8" cy="8" r="0.7" fill="currentColor"/></svg>
+                  </button>
+                  <button class="iconbutton" type="button" id="theme-btn" aria-label="切到深色" title="切到深色">
+                    <svg class="glyph" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><g transform="scale(0.6667)"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></g></svg>
+                  </button>
+                  <button class="iconbutton" type="button" aria-label="设置" title="设置" data-goto="settings">
+                    <svg class="glyph" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><g transform="translate(8 8)"><rect x="-1.15" y="-6.1" width="2.3" height="2.6" rx="0.6" fill="currentColor"/><rect x="-1.15" y="-6.1" width="2.3" height="2.6" rx="0.6" fill="currentColor" transform="rotate(60)"/><rect x="-1.15" y="-6.1" width="2.3" height="2.6" rx="0.6" fill="currentColor" transform="rotate(120)"/><rect x="-1.15" y="-6.1" width="2.3" height="2.6" rx="0.6" fill="currentColor" transform="rotate(180)"/><rect x="-1.15" y="-6.1" width="2.3" height="2.6" rx="0.6" fill="currentColor" transform="rotate(240)"/><rect x="-1.15" y="-6.1" width="2.3" height="2.6" rx="0.6" fill="currentColor" transform="rotate(300)"/></g><circle cx="8" cy="8" r="4.1" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="1.45" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+                  </button>
+                </div>
+              </div>
+              <dl class="readout">
+                <div class="readout__cell"><dt class="readout__label">现在</dt><dd class="readout__value" id="ro-now">14:00</dd></div>
+                <div class="readout__cell"><dt class="readout__label">还剩</dt><dd class="readout__value" id="ro-left">7</dd></div>
+                <div class="readout__cell head__late"><dt class="readout__label">逾期</dt><dd class="readout__value" id="ro-late">2</dd></div>
+              </dl>
+            </header>
+
+            <div class="board">
+              <section class="section section--overdue">
+                <h2 class="section__label">逾期<span class="section__count" id="cnt-overdue">2</span></h2>
+                <ul class="rows" id="sec-overdue"></ul>
+              </section>
+              <section class="section">
+                <h2 class="section__label">接下来<span class="section__count" id="cnt-next">3</span></h2>
+                <ul class="rows" id="sec-next"></ul>
+              </section>
+              <section class="section">
+                <h2 class="section__label">今天随时<span class="section__count" id="cnt-anytime">2</span></h2>
+                <ul class="rows" id="sec-anytime"></ul>
+              </section>
+              <section class="section">
+                <h2 class="section__label">每天<span class="section__count" id="cnt-daily">3</span></h2>
+                <ul class="rows" id="sec-daily"></ul>
+              </section>
+            </div>
+
+            <div class="addbar">
+              <button class="addbar__button" type="button" aria-label="新建任务" title="新建（N）" data-goto="edit">
+                + 记一件<span class="addbar__key">N</span>
+              </button>
+            </div>
+
+            <footer class="bottombar">
+              <div class="bottombar__links">
+                <button class="bottombar__link" type="button" data-goto="inbox">收件箱 · <span class="mono" id="cnt-inbox">3</span> 件</button>
+                <button class="bottombar__link" type="button" data-goto="future">以后 · <span class="mono" id="cnt-future">4</span> 件</button>
+                <button class="bottombar__link" type="button" data-goto="done">已完成 · <span class="mono" id="cnt-done">5</span> 件</button>
+              </div>
+              <span class="bottombar__state">提醒已开</span>
+            </footer>
+          </section>
+
+          <!-- ══════ 收件箱 ══════ -->
+          <section class="view" data-view="inbox">
+            <header class="topbar">
+              <div class="topbar__lead">
+                <button class="iconbutton" type="button" aria-label="返回今天" data-goto="board">←</button>
+                <h1 class="topbar__title">收件箱</h1>
+              </div>
+              <span class="topbar__date" id="cnt-inbox-2">3 件</span>
+            </header>
+            <div class="page"><div class="page__body">
+              <section class="section">
+                <h2 class="section__label" style="padding-left:var(--space-3)">清单池</h2>
+                <ul class="rows" id="sec-inbox"></ul>
+              </section>
+            </div></div>
+            <div class="addbar">
+              <button class="addbar__button" type="button" aria-label="记一件还没定时间的事" data-goto="edit">
+                + 记一件<span class="addbar__key">N</span>
+              </button>
+            </div>
+            <footer class="bottombar">
+              <span class="bottombar__state">「今天做」把它挪进今天</span>
+              <span class="bottombar__state">还没定日子的事都先落在这</span>
+            </footer>
+          </section>
+
+          <!-- ══════ 以后 ══════ -->
+          <section class="view" data-view="future">
+            <header class="topbar">
+              <div class="topbar__lead">
+                <button class="iconbutton" type="button" aria-label="返回今天" data-goto="board">←</button>
+                <h1 class="topbar__title">以后</h1>
+              </div>
+              <span class="topbar__date" id="cnt-future-2">4 件</span>
+            </header>
+            <div class="page"><div class="page__body" id="future-body"></div></div>
+            <footer class="bottombar">
+              <span class="bottombar__state">点标题改日期</span>
+              <span class="bottombar__state">逾期不在这里 —— 它在看板置顶</span>
+            </footer>
+          </section>
+
+          <!-- ══════ 已完成 ══════ -->
+          <section class="view" data-view="done">
+            <header class="topbar">
+              <div class="topbar__lead">
+                <button class="iconbutton" type="button" aria-label="返回今天" data-goto="board">←</button>
+                <h1 class="topbar__title">已完成</h1>
+              </div>
+              <span class="topbar__date" id="cnt-done-2">5 件</span>
+            </header>
+            <div class="page"><div class="page__body" id="done-body"></div></div>
+            <footer class="bottombar">
+              <span class="bottombar__state">点左边的勾，把它收回今天</span>
+            </footer>
+          </section>
+
+          <!-- ══════ 日历 ══════ -->
+          <section class="view" data-view="calendar">
+            <header class="topbar">
+              <div class="topbar__lead">
+                <button class="iconbutton" type="button" aria-label="返回今天" data-goto="board">←</button>
+                <h1 class="topbar__title">日历</h1>
+              </div>
+              <div class="topbar__actions"><button class="topbar__button" type="button" id="cal-today">今天</button></div>
+            </header>
+            <div class="page"><div class="page__body">
+              <div class="cal__head">
+                <button class="cal__nav" type="button" aria-label="上个月" id="cal-prev">‹</button>
+                <span class="cal__title" id="cal-title">2026 年 十月</span>
+                <button class="cal__nav" type="button" aria-label="下个月" id="cal-next">›</button>
+              </div>
+              <div class="cal__dows" aria-hidden="true" id="cal-dows"></div>
+              <div class="monthgrid" id="monthgrid"></div>
+              <div class="cal__note" id="cal-coverage">农历、节气按算法算出来，「休 / 班」按国务院办公厅的通知（已收录到 2026 年，没公布的年份不猜）。</div>
+              <section class="daycard" id="daycard"></section>
+            </div></div>
+            <footer class="bottombar">
+              <button class="bottombar__link" type="button" data-goto="countdown" id="cal-next-holiday">倒计时</button>
+            </footer>
+          </section>
+
+          <!-- ══════ 倒计时 ══════ -->
+          <section class="view" data-view="countdown">
+            <header class="topbar">
+              <div class="topbar__lead">
+                <button class="iconbutton" type="button" aria-label="返回今天" data-goto="board">←</button>
+                <h1 class="topbar__title">倒计时</h1>
+              </div>
+              <div class="topbar__actions">
+                <button class="iconbutton iconbutton--solid" type="button" aria-label="加一个纪念日" title="加一个纪念日" id="ann-toggle">+</button>
+              </div>
+            </header>
+            <div class="page"><div class="page__body">
+              <section class="annform" id="annform" hidden>
+                <div class="annform__head">
+                  <span class="annform__title">加一个纪念日</span>
+                  <button class="linkbutton" type="button" id="ann-close">收起</button>
+                </div>
+                <div class="field"><span class="field__label">名字</span><span class="field__control"><input id="ann-name" placeholder="结婚纪念日 / 妈妈生日"></span></div>
+                <div class="field"><span class="field__label">日期</span><span class="field__control field__control--row">
+                  <span class="datefield"><span class="mono" id="ann-date">2001-08-30</span><span class="datefield__dow" id="ann-date-dow">周四</span><span class="datefield__caret">▾</span></span>
+                  <span class="unit" id="ann-lunar-unit"></span></span></div>
+                <div class="field"><span class="field__label">重复</span><span class="field__control"><label class="check"><input type="checkbox" id="ann-yearly" checked>每年都数</label></span></div>
+                <div class="field" id="ann-lunar-field"><span class="field__label">按哪个历</span><span class="field__control"><label class="check"><input type="checkbox" id="ann-lunar">按农历月日重复（农历生日）</label></span></div>
+                <div class="field__hint" id="ann-repeat-hint">每年到这一天倒数。</div>
+                <div class="field"><span class="field__label">提醒</span><span class="field__control"><label class="check"><input type="checkbox" id="ann-notify">到那天提醒我</label></span></div>
+                <div class="field__hint" id="ann-notify-hint" hidden>到那天按设置里那个「全天提醒」时刻弹一条，现在是 09:00</div>
+                <div class="field__hint field__hint--warn" id="ann-problem" hidden>名字不能是空的</div>
+                <div class="annform__foot">
+                  <button class="topbar__button topbar__button--primary" type="button" id="ann-save">记下</button>
+                  <button class="bottombar__danger" type="button" id="ann-del">删掉这条</button>
+                </div>
+              </section>
+
+              <div id="cd-hero"></div>
+
+              <div class="group__label" id="cd-holiday-label">节假日</div>
+              <ul id="holiday-list"></ul>
+
+              <div class="group__label">纪念日</div>
+              <ul id="ann-list"></ul>
+              <div id="cd-hidden"></div>
+              <div class="cal__note">节假日按国务院办公厅的通知（已收录到 2026 年）；纪念日默认只倒数，勾了「到那天提醒我」的才弹通知</div>
+            </div></div>
+          </section>
+
+          <!-- ══════ 设置 ══════ -->
+          <section class="view" data-view="settings">
+            <header class="topbar">
+              <div class="topbar__lead">
+                <button class="iconbutton" type="button" aria-label="返回今天" data-goto="board">←</button>
+                <h1 class="topbar__title">设置</h1>
+              </div>
+            </header>
+            <div class="page"><div class="page__body">
+              <div class="group__label">提醒</div>
+              <div class="field"><span class="field__label">系统通知</span><span class="field__control"><label class="check"><input type="checkbox" checked>到点弹通知</label></span></div>
+              <div class="field"><span class="field__label">提示音</span><span class="field__control"><label class="check"><input type="checkbox" checked>通知带声音</label></span></div>
+              <div class="field"><span class="field__label">全天提醒</span><span class="field__control field__control--row">
+                <span class="anchor"><button class="datefield" type="button"><span class="mono">09:00</span><span class="datefield__caret">▾</span></button></span>
+                <span class="unit">全天任务和纪念日在这时提醒</span></span></div>
+              <div class="field"><span class="field__label">默认提前</span><span class="field__control field__control--row"><input type="number" value="10"><span class="unit">分钟（新建截止任务时预填）</span></span></div>
+              <div class="field"><span class="field__label">推迟</span><span class="field__control"><span class="segmented">
+                <button class="segmented__item" type="button">5 分钟</button>
+                <button class="segmented__item segmented__item--on" type="button">10 分钟</button>
+                <button class="segmented__item" type="button">30 分钟</button></span></span></div>
+
+              <div class="group__label">倒计时</div>
+              <div class="field"><span class="field__label">节假日</span><span class="field__control"><label class="check"><input type="checkbox" checked>在倒计时里显示法定节假日</label></span></div>
+              <div class="field"><span class="field__label">只看</span><span class="field__control field__control--row"><span class="segmented">
+                <button class="segmented__item" type="button">一个月</button>
+                <button class="segmented__item" type="button">三个月</button>
+                <button class="segmented__item segmented__item--on" type="button">一年</button>
+                <button class="segmented__item" type="button">不限</button></span></span></div>
+              <div class="field__hint">更远的纪念日不列出来（已经过掉的那种永远会显示）。日历上的农历与休假标记不受这里影响。</div>
+
+              <div class="group__label">免打扰</div>
+              <div class="field"><span class="field__label">时段</span><span class="field__control"><label class="check"><input type="checkbox" checked>这段时间不弹通知</label></span></div>
+              <div class="field"><span class="field__label">从</span><span class="field__control"><button class="datefield" type="button"><span class="mono">22:00</span><span class="datefield__caret">▾</span></button></span></div>
+              <div class="field"><span class="field__label">到</span><span class="field__control field__control--row"><button class="datefield" type="button"><span class="mono">08:00</span><span class="datefield__caret">▾</span></button><span class="unit">可以跨午夜</span></span></div>
+              <div class="field"><span class="field__label">离开时</span><span class="field__control"><label class="check"><input type="checkbox">人不在电脑前就不弹，回来再补</label></span></div>
+
+              <div class="group__label">外观与启动</div>
+              <div class="field"><span class="field__label">主题</span><span class="field__control"><span class="segmented" id="theme-seg">
+                <button class="segmented__item segmented__item--on" type="button" data-theme="light">跟随系统</button>
+                <button class="segmented__item" type="button" data-theme="light">浅色</button>
+                <button class="segmented__item" type="button" data-theme="dark">深色</button></span></span></div>
+              <div class="field"><span class="field__label">窗口置顶</span><span class="field__control"><label class="check"><input type="checkbox">让主窗口浮在所有窗口前面</label></span></div>
+              <div class="field"><span class="field__label">开机启动</span><span class="field__control"><label class="check"><input type="checkbox" checked>登录 Windows 后自动运行</label></span></div>
+
+              <div class="group__label">随手记</div>
+              <div class="field field--stack"><span class="field__label">全局快捷键</span>
+                <input class="mono" value="Ctrl+Alt+T" readonly>
+                <div class="field__hint">按一下就在屏幕中间开一个小窗，记完就关</div>
+                <div class="page__foot"><button class="linkbutton" type="button" id="mini-toggle">看看那个小窗</button></div>
+              </div>
+
+              <div class="group__label">数据</div>
+              <div class="field field--stack"><span class="field__label">数据文件</span>
+                <div class="field__hint mono path">%APPDATA%\todo-reminder\todo-reminder.json</div>
+                <div class="page__foot"><button class="linkbutton" type="button">打开所在文件夹</button><button class="linkbutton" type="button">退出应用</button></div>
+              </div>
+
+              <div class="group__label">更新</div>
+              <div class="field"><span class="field__label">当前版本</span><div class="field__hint mono">0.1.10</div></div>
+              <div class="field"><span class="field__label">自动更新</span><span class="field__control"><label class="check"><input type="checkbox" checked>自动检查并下载</label></span></div>
+              <div class="field field--stack"><span class="field__label">更新状态</span>
+                <div class="field__hint">已是最新版本</div>
+                <div class="page__foot"><button class="linkbutton" type="button">检查更新</button></div>
+              </div>
+
+              <div class="group__label">关于</div>
+              <div class="field field--stack"><span class="field__label">项目主页</span>
+                <div class="field__hint mono path">https://github.com/FightZhanAng/todo-reminder</div>
+                <div class="page__foot"><button class="linkbutton" type="button">用浏览器打开</button></div>
+              </div>
+            </div></div>
+          </section>
+
+          <!-- ══════ 编辑器 ══════ -->
+          <section class="view" data-view="edit">
+            <header class="topbar">
+              <div class="topbar__lead">
+                <button class="iconbutton" type="button" aria-label="不保存，返回" data-goto="board">←</button>
+                <h1 class="topbar__title">记一件</h1>
+              </div>
+              <div class="topbar__actions"><button class="topbar__button topbar__button--primary" type="button" id="edit-save">记下</button></div>
+            </header>
+            <div class="page"><div class="page__body">
+              <div class="field"><span class="field__label">类型</span><span class="field__control"><span class="segmented" id="kind-seg">
+                <button class="segmented__item segmented__item--on" type="button" data-kind="deadline">截止</button>
+                <button class="segmented__item" type="button" data-kind="recurring">周期</button>
+                <button class="segmented__item" type="button" data-kind="someday">清单</button></span></span></div>
+              <div class="field"><span class="field__label">标题</span><span class="field__control"><input placeholder="要做什么" value="交季度报销单"></span></div>
+
+              <div data-kind-block="deadline">
+                <div class="field"><span class="field__label">日期</span><span class="field__control anchor"><span class="anchor">
+                  <button class="datefield" type="button" id="date-toggle"><span class="mono">2026-10-13</span><span class="datefield__dow">周二</span><span class="datefield__rel">昨天</span><span class="datefield__caret">▾</span></button>
+                  <div class="popover popover--cal" id="date-pop" hidden>
+                    <div class="cal__head"><button class="cal__nav" type="button">‹</button><span class="cal__title">2026 年 十月</span><button class="cal__nav" type="button">›</button></div>
+                    <div class="cal__dows" aria-hidden="true" id="pop-dows"></div>
+                    <div class="cal__grid" id="pop-grid"></div>
+                    <div class="cal__quick"><button class="cal__chip" type="button">今天</button><button class="cal__chip" type="button">明天</button><button class="cal__chip" type="button">下周一</button></div>
+                  </div></span></span></div>
+                <div class="field"><span class="field__label">时刻</span><span class="field__control field__control--row">
+                  <label class="check"><input type="checkbox">全天</label>
+                  <span class="anchor"><button class="datefield" type="button" id="time-toggle"><span class="mono">17:00</span><span class="datefield__caret">▾</span></button>
+                    <div class="popover popover--time" id="time-pop" hidden>
+                      <div class="timepick__label">时</div>
+                      <div class="timepick__grid timepick__grid--h" id="pick-h"></div>
+                      <div class="timepick__label" style="margin-top:var(--space-3)">分</div>
+                      <div class="timepick__grid timepick__grid--m" id="pick-m"></div>
+                    </div></span></span></div>
+                <div class="field"><span class="field__label">提前</span><span class="field__control field__control--row"><input type="number" value="10"><span class="unit">分钟提醒</span></span></div>
+              </div>
+
+              <div data-kind-block="recurring" hidden>
+                <div class="field"><span class="field__label">频率</span><span class="field__control"><span class="segmented" id="freq-seg">
+                  <button class="segmented__item segmented__item--on" type="button" data-freq="daily">每天</button>
+                  <button class="segmented__item" type="button" data-freq="weekly">每周</button>
+                  <button class="segmented__item" type="button" data-freq="monthly">每月</button></span></span></div>
+                <div class="field"><span class="field__label">间隔</span><span class="field__control field__control--row"><span class="unit">每</span><input type="number" value="1"><span class="unit" id="freq-unit">天</span></span></div>
+                <div class="field field--stack" data-freq-block="weekly" hidden><span class="field__label">星期</span><span class="segmented">
+                  <button class="segmented__item" type="button">一</button><button class="segmented__item segmented__item--on" type="button">二</button><button class="segmented__item" type="button">三</button><button class="segmented__item" type="button">四</button><button class="segmented__item segmented__item--on" type="button">五</button><button class="segmented__item" type="button">六</button><button class="segmented__item" type="button">日</button></span></div>
+                <div class="field field--stack" data-freq-block="monthly" hidden><span class="field__label">几号</span>
+                  <span class="daygrid" id="monthdays"></span>
+                  <div class="field__hint">31 号在小月自动落到当月最后一天</div></div>
+                <div class="field"><span class="field__label">提醒时刻</span><span class="field__control"><button class="datefield" type="button"><span class="mono">07:30</span><span class="datefield__caret">▾</span></button></span></div>
+                <div class="field"><span class="field__label">周末</span><span class="field__control"><label class="check"><input type="checkbox">跳过周末，不补到工作日</label></span></div>
+                <div class="field field--stack"><span class="field__label">接下来</span><div class="field__hint mono">今天 · 明天 · 后天 · 周六</div></div>
+              </div>
+
+              <div class="field field--stack"><span class="field__label">备注</span><textarea rows="3" placeholder="可选"></textarea></div>
+              <div class="field"><span class="field__label">重要</span><span class="field__control"><label class="check"><input type="checkbox">顶部加一个标记，排序靠前</label></span></div>
+            </div></div>
+            <footer class="bottombar"><span></span><button class="bottombar__danger" type="button">删除这条</button></footer>
+          </section>
+
+          <div class="flash" id="flash" hidden><span class="flash__inner">已记下</span></div>
+        </div>
+
+        <!-- 快速添加窗（独立小窗） -->
+        <div class="miniwin" id="miniwin" hidden>
+          <div class="miniwin__bar"><span>随手记 · Ctrl+Alt+T</span><button class="noticebar__close" type="button" aria-label="关闭" id="mini-close">×</button></div>
+          <form class="quickadd" onsubmit="return false">
+            <input class="quickadd__title" placeholder="要做什么">
+            <div class="quickadd__row">
+              <button class="quickadd__btn quickadd__btn--primary" type="submit">今天 全天</button>
+              <button class="quickadd__btn" type="button">明天 全天</button>
+              <span class="quickadd__sep"></span>
+              <input class="mono quickadd__time" aria-label="今天的时刻" placeholder="14:30">
+              <button class="quickadd__btn" type="button">今天这个点</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div class="device__caption">420 × 720 客户区（窄窗是这套布局的判据） · 深浅主题都在上面那个钮上</div>
+    </div>
+
+    <!-- ══════════════ 右栏 ══════════════ -->
+    <aside class="rail">
+      <div class="rail__card">
+        <div class="rail__label">视图</div>
+        <nav class="navlist" id="nav">
+          <button class="navlist__item" type="button" data-goto="board" aria-current="true"><span class="navlist__idx">01</span>看板<span class="navlist__note">今天四段</span></button>
+          <button class="navlist__item" type="button" data-goto="inbox"><span class="navlist__idx">02</span>收件箱<span class="navlist__note">清单池</span></button>
+          <button class="navlist__item" type="button" data-goto="future"><span class="navlist__idx">03</span>以后<span class="navlist__note">第三本账</span></button>
+          <button class="navlist__item" type="button" data-goto="done"><span class="navlist__idx">04</span>已完成<span class="navlist__note">按完成日分组</span></button>
+          <button class="navlist__item" type="button" data-goto="calendar"><span class="navlist__idx">05</span>日历<span class="navlist__note">按任意一天</span></button>
+          <button class="navlist__item" type="button" data-goto="countdown"><span class="navlist__idx">06</span>倒计时<span class="navlist__note">假期 + 纪念日</span></button>
+          <button class="navlist__item" type="button" data-goto="settings"><span class="navlist__idx">07</span>设置<span class="navlist__note">更新 / 关于</span></button>
+          <button class="navlist__item" type="button" data-goto="edit"><span class="navlist__idx">08</span>记一件<span class="navlist__note">编辑器</span></button>
+        </nav>
+      </div>
+
+      <div class="rail__card">
+        <div class="rail__label">令牌</div>
+        <div class="swatches">
+          <div class="swatch"><div class="swatch__chip" style="background:var(--accent)"></div><span class="swatch__name">accent</span></div>
+          <div class="swatch"><div class="swatch__chip" style="background:var(--accent-hover)"></div><span class="swatch__name">hover</span></div>
+          <div class="swatch"><div class="swatch__chip" style="background:var(--fg)"></div><span class="swatch__name">fg</span></div>
+          <div class="swatch"><div class="swatch__chip" style="background:var(--muted)"></div><span class="swatch__name">muted</span></div>
+          <div class="swatch"><div class="swatch__chip" style="background:var(--danger)"></div><span class="swatch__name">danger</span></div>
+          <div class="swatch"><div class="swatch__chip" style="background:var(--slab)"></div><span class="swatch__name">slab</span></div>
+          <div class="swatch"><div class="swatch__chip" style="background:var(--surface-warm)"></div><span class="swatch__name">warm</span></div>
+        </div>
+      </div>
+
+      <div class="rail__card">
+        <div class="rail__label">跟着原项目的硬规矩</div>
+        <dl class="facts">
+          <div><dt>量尺是一根轴 + 两级分格</dt><dd><code>--ruler-x</code> = 游标 + 时刻列，段标签的缩进由它推出；没有时刻的行照样渲染空的 <code>.row__clock</code>，否则轴断一截。</dd></div>
+          <div><dt>读数三档，只有两个色相</dt><dd>不急 8px 细灰 / 快到了 12px 主色加粗 / 逾期 20px 且越过轴向左伸出。逾期整格转 <code>--danger</code>（标签一起）。</dd></div>
+          <div><dt>读数带是固定三轨 grid</dt><dd><code>repeat(3, 1fr)</code> 而非 <code>flex:1</code>，某格不出现时几何不动。</dd></div>
+          <div><dt>强调色实底只有两块</dt><dd>「+ 记一件」与表单的「记下」，都用 <code>--accent</code> 实底 + <code>--accent-on</code> 字。倒计时那块大盘走另一对 <code>--slab</code> / <code>--on-slab</code> —— 强调色是说「按我」的，读数不该借它。</dd></div>
+          <div><dt>铺了底就把字升一级</dt><dd><code>--accent-wash</code> 的浓度够吃掉 <code>--muted</code> 的余量，所以假日那格的农历文字升到 <code>--fg</code>。</dd></div>
+          <div><dt>行只做 opacity 入场</dt><dd>带 transform 的祖先会成为 fixed 行菜单的包含块，动画那 200ms 里打开菜单会定位错。</dd></div>
+          <div><dt>覆盖式视图 <code>.page</code></dt><dd><code>flex:1; min-height:0</code>，写 <code>height:100%</code> 会让页面底部那条永远差一截且滚不出来。</dd></div>
+          <div><dt>数字一律等宽</dt><dd>读数、时刻、日号走 <code>--font-mono</code> + <code>"tnum"</code>，标题 300 字重 + 大字距。</dd></div>
+        </dl>
+      </div>
+
+      <div class="rail__card">
+        <div class="rail__label">键盘</div>
+        <dl class="facts">
+          <div><dt class="mono">Enter / Backspace</dt><dd>完成 / 删除（删除留 5 秒撤销）</dd></div>
+          <div><dt class="mono">s / t</dt><dd>推迟 10 分钟 / 推到明天</dd></div>
+          <div><dt class="mono">N</dt><dd>记一件</dd></div>
+          <div><dt class="mono">Esc</dt><dd>逐级返回：编辑器回它进来的地方，其余回看板</dd></div>
+        </dl>
+      </div>
+    </aside>
+
+  </main>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+ * 原型脚本：只做「看起来是活的」这件事 —— 数据是夹具，日期以真实今天为锚。
+ * 不做持久化、不接主进程、不联网。
+ * ═══════════════════════════════════════════════════════════════════ */
+const DAY = 86400000;
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const CAL_HEADERS = [1, 2, 3, 4, 5, 6, 0].map((d) => WEEKDAYS[d].slice(1));
+/* 月份用中文月名，不用「10 月」—— 和 shared/calendar.ts 的 CN_MONTHS 同一份口径 */
+const CN_MONTHS = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+/* 演示时钟：整份原型钉在 2026-09-26 周六 14:00（农历八月十六、中秋节第 2 天）。
+   为什么钉住而不跟真表走 —— 所有派生数字必须同时成立：读数带的「现在 / 还剩 / 逾期」、
+   倒计时的「正在放假 第几天」、月历上那条连休色带。跟着真实时钟走下去，「最近的假期」
+   会整段消失，那两块招牌画面空掉之后看不出任何布局名堂。
+   （和 pnpm smoke 跑在虚拟时钟上是同一个做法。）
+   为什么挑这一天而不是国庆 —— 挑正在放假的第 2 天，「正在放假 / 今天是第 N 天」那条
+   分支才有东西可看；而 9 月这一屏同时装着 20 号那枚「班」、25–27 那条「休」色带、
+   白露与秋分两枚节气，以及一条还没来的「国庆节 还有 5 天」。 */
+const NOW = new Date(2026, 8, 26, 14, 0, 0);
+const now = NOW;
+const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+const dayAt = (n) => new Date(today0.getTime() + n * DAY);
+const pad = (n) => String(n).padStart(2, '0');
+const clock = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ── 夹具：day 是相对今天的天数 ───────────────────────────────────── */
+let seq = 0;
+const T = (o) => ({ id: 'k' + (++seq), kind: 'deadline', done: false, important: false, ...o });
+const TASKS = [
+  T({ title: '回客户邮件', day: -2, time: '09:30' }),
+  T({ title: '交季度报销单', day: -1, time: '17:00', important: true }),
+  T({ title: '定下周差旅酒店', day: 0, time: '11:30' }),
+  T({ title: '下午的会 · Q4 排期', day: 0, time: '15:00', important: true }),
+  T({ title: '取快递 · 顺丰', day: 0, time: '18:40' }),
+  T({ title: '给妈妈打电话', day: 0, allDay: true }),
+  T({ title: '续健身房会籍', day: 0, allDay: true, important: true }),
+  T({ title: '晨间 20 分钟阅读', kind: 'recurring', time: '07:30', streak: 12 }),
+  T({ title: '吃维生素 D', kind: 'recurring', time: '09:00', streak: 41 }),
+  T({ title: '浇绿萝', kind: 'recurring', time: '19:00', freq: '每周一 · 四' }),
+  T({ title: '把阳台的旧书处理掉', kind: 'someday' }),
+  T({ title: '研究一下年度体检套餐', kind: 'someday' }),
+  T({ title: '学做一道硬菜', kind: 'someday' }),
+  T({ title: '交房租', day: 2, allDay: true }),
+  T({ title: '年度体检', day: 4, time: '09:00' }),
+  T({ title: '飞上海 · MU5137', day: 8, time: '07:20', important: true }),
+  T({ title: '结婚纪念日', day: 12, allDay: true }),
+  T({ title: '提交周报', day: 0, doneDay: 0, doneAt: '10:12' }),
+  T({ title: '修打印机缺纸', day: 0, doneDay: 0, doneAt: '08:40' }),
+  /* 昨天截止、今天才办完 —— 已完成这本账按「完成日」分组，所以它进今天那组 */
+  T({ title: '回房东消息', day: -1, doneDay: 0, doneAt: '09:15' }),
+  T({ title: '买猫粮', day: -1, doneDay: -1, doneAt: '19:20' }),
+  T({ title: '整理桌面', day: -2, doneDay: -2, doneAt: '15:30' }),
+];
+/* 纪念日存的是**公历锚点**（不是 Task，没有「完成」这个动作）。农历生日也照样
+   存公历那天，农历月日从锚点推出来 —— 让用户自己填「八月十五」既没有控件可用，
+   也挡不住他填出一个不存在的日子。下面四条的数字全部由 anniversaryOf() 现算。 */
+const ANNIVERSARIES = [
+  { title: '妈妈生日', date: '1970-09-29', yearly: true, lunar: true, notify: true },
+  { title: '结婚纪念日', date: '2020-10-02', yearly: true, lunar: false, notify: true },
+  { title: '女儿生日', date: '2021-09-22', yearly: true, lunar: true, notify: false },
+  { title: '第一次一起看海', date: '2024-07-13', yearly: false, lunar: false, notify: false },
+];
+
+/* ── 农历：算出来的，不是查表 ──────────────────────────────────────────
+   与 shared/lunar.ts 同一份年表（1900–2100，每年一个 17 位十六进制数：低 4 位是
+   闰几月、bit16 是闰月大小、bit15…bit4 是十二个月的大小）。节气走 term.ts 的
+   太阳黄经迭代，见下面。core-test.ts 拿国务院通知里的春节 / 中秋 / 端午当锚点
+   逐条对过，这里照抄的是验过的那一份。 */
+const LUNAR_INFO = [
+  0x04bd8, 0x04ae0, 0x0a570, 0x054d5, 0x0d260, 0x0d950, 0x16554, 0x056a0, 0x09ad0, 0x055d2,
+  0x04ae0, 0x0a5b6, 0x0a4d0, 0x0d250, 0x1d255, 0x0b540, 0x0d6a0, 0x0ada2, 0x095b0, 0x14977,
+  0x04970, 0x0a4b0, 0x0b4b5, 0x06a50, 0x06d40, 0x1ab54, 0x02b60, 0x09570, 0x052f2, 0x04970,
+  0x06566, 0x0d4a0, 0x0ea50, 0x06e95, 0x05ad0, 0x02b60, 0x186e3, 0x092e0, 0x1c8d7, 0x0c950,
+  0x0d4a0, 0x1d8a6, 0x0b550, 0x056a0, 0x1a5b4, 0x025d0, 0x092d0, 0x0d2b2, 0x0a950, 0x0b557,
+  0x06ca0, 0x0b550, 0x15355, 0x04da0, 0x0a5b0, 0x14573, 0x052b0, 0x0a9a8, 0x0e950, 0x06aa0,
+  0x0aea6, 0x0ab50, 0x04b60, 0x0aae4, 0x0a570, 0x05260, 0x0f263, 0x0d950, 0x05b57, 0x056a0,
+  0x096d0, 0x04dd5, 0x04ad0, 0x0a4d0, 0x0d4d4, 0x0d250, 0x0d558, 0x0b540, 0x0b6a0, 0x195a6,
+  0x095b0, 0x049b0, 0x0a974, 0x0a4b0, 0x0b27a, 0x06a50, 0x06d40, 0x0af46, 0x0ab60, 0x09570,
+  0x04af5, 0x04970, 0x064b0, 0x074a3, 0x0ea50, 0x06b58, 0x055c0, 0x0ab60, 0x096d5, 0x092e0,
+  0x0c960, 0x0d954, 0x0d4a0, 0x0da50, 0x07552, 0x056a0, 0x0abb7, 0x025d0, 0x092d0, 0x0cab5,
+  0x0a950, 0x0b4a0, 0x0baa4, 0x0ad50, 0x055d9, 0x04ba0, 0x0a5b0, 0x15176, 0x052b0, 0x0a930,
+  0x07954, 0x06aa0, 0x0ad50, 0x05b52, 0x04b60, 0x0a6e6, 0x0a4e0, 0x0d260, 0x0ea65, 0x0d530,
+  0x05aa0, 0x076a3, 0x096d0, 0x04afb, 0x04ad0, 0x0a4d0, 0x1d0b6, 0x0d250, 0x0d520, 0x0dd45,
+  0x0b5a0, 0x056d0, 0x055b2, 0x049b0, 0x0a577, 0x0a4b0, 0x0aa50, 0x1b255, 0x06d20, 0x0ada0,
+  0x14b63, 0x09370, 0x049f8, 0x04970, 0x064b0, 0x168a6, 0x0ea50, 0x06b20, 0x1a6c4, 0x0aae0,
+  0x0a2e0, 0x0d2e3, 0x0c960, 0x0d557, 0x0d4a0, 0x0da50, 0x05d55, 0x056a0, 0x0a6d0, 0x055d4,
+  0x052d0, 0x0a9b8, 0x0a950, 0x0b4a0, 0x0b6a6, 0x0ad50, 0x055a0, 0x0aba4, 0x0a5b0, 0x052b0,
+  0x0b273, 0x06930, 0x07337, 0x06aa0, 0x0ad50, 0x14b55, 0x04b60, 0x0a570, 0x054e4, 0x0d160,
+  0x0e968, 0x0d520, 0x0daa0, 0x16aa6, 0x056d0, 0x04ae0, 0x0a9d4, 0x0a2d0, 0x0d150, 0x0f252,
+  0x0d520,
+];
+const LUNAR_MIN_YEAR = 1900;
+const BASE_TS = new Date(1900, 0, 31).getTime();
+const DAY_NAMES = ['初一', '初二', '初三', '初四', '初五', '初六', '初七', '初八', '初九', '初十',
+  '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
+  '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十'];
+const MONTH_NAMES = ['正', '二', '三', '四', '五', '六', '七', '八', '九', '十', '冬', '腊'];
+const infoOf = (y) => (y < LUNAR_MIN_YEAR || y > 2100 ? null : LUNAR_INFO[y - LUNAR_MIN_YEAR]);
+const leapMonthOf = (y) => { const i = infoOf(y); return i === null ? 0 : i & 0xf; };
+const leapDaysOf = (y) => { const i = infoOf(y); return (i === null || (i & 0xf) === 0) ? 0 : ((i & 0x10000) !== 0 ? 30 : 29); };
+const monthDaysOf = (y, m) => { const i = infoOf(y); return (i === null || m < 1 || m > 12) ? 0 : ((i & (0x10000 >> m)) !== 0 ? 30 : 29); };
+const lunarYearDays = (y) => { let s = 0; for (let m = 1; m <= 12; m++) s += monthDaysOf(y, m); return s + leapDaysOf(y); };
+/* dayIndex 必须取整：shared/time.ts 用 Math.round(Date.UTC(...)/86400000)，
+   直接 ts/DAY 会带进时区小数，农历日就会整体偏一格（界面上只是「十五」变「十四」，
+   看不出问题，中秋那天就写错了）。 */
+const dayIndex = (ts) => { const d = new Date(ts); return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY); };
+const BASE_DAY = dayIndex(BASE_TS);
+const addDays = (ts, n) => { const d = new Date(ts); d.setDate(d.getDate() + n); return d.getTime(); };
+const midnight = (ts) => { const d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+let yearOffsets = null;
+function lunarOffsets() {
+  if (yearOffsets !== null) return yearOffsets;
+  const out = [0]; let sum = 0;
+  for (let y = LUNAR_MIN_YEAR; y <= 2100; y++) { sum += lunarYearDays(y); out.push(sum); }
+  yearOffsets = out; return out;
+}
+/* 公历某天 → 农历。超出 1900–2100 给 null（不猜） */
+function lunarOf(ts) {
+  let offset = dayIndex(ts) - BASE_DAY;
+  if (offset < 0) return null;
+  const table = lunarOffsets();
+  if (offset >= table[table.length - 1]) return null;
+  let lo = 0, hi = table.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (table[mid] <= offset) lo = mid; else hi = mid; }
+  const year = LUNAR_MIN_YEAR + lo;
+  offset -= table[lo];
+  const leap = leapMonthOf(year);
+  let month = 1, isLeap = false;
+  for (; month <= 12; month++) {
+    const days = isLeap ? leapDaysOf(year) : monthDaysOf(year, month);
+    if (offset < days) break;
+    offset -= days;
+    if (leap === month && !isLeap) { isLeap = true; month--; } else if (isLeap) { isLeap = false; }
+  }
+  const day = offset + 1;
+  const monthName = `${isLeap ? '闰' : ''}${MONTH_NAMES[month - 1]}月`;
+  const dayName = DAY_NAMES[day - 1] ?? '';
+  return { year, month, day, isLeap, monthName, dayName, label: `${monthName}${dayName}` };
+}
+/* 农历 → 公历。月日越界（比如某个没有三十的月份填了三十）给 null */
+function solarFromLunar(year, month, day, isLeap = false) {
+  if (infoOf(year) === null || month < 1 || month > 12) return null;
+  const leap = leapMonthOf(year);
+  if (isLeap && leap !== month) return null;
+  if (day < 1 || day > (isLeap ? leapDaysOf(year) : monthDaysOf(year, month))) return null;
+  let days = lunarOffsets()[year - LUNAR_MIN_YEAR];
+  for (let m = 1; m < month; m++) { days += monthDaysOf(year, m); if (leap === m) days += leapDaysOf(year); }
+  if (isLeap) days += monthDaysOf(year, month);
+  return midnight(addDays(BASE_TS, days + day - 1));
+}
+/* 传统节日按农历月日定，跟国务院的法定假日是两件事。除夕是**腊月最后一天**，
+   不是「腊月三十」—— 腊月是小月时它落在二十九，写死 30 会整整漏掉一半年份。 */
+function lunarFestival(l) {
+  if (l === null || l.isLeap) return null;
+  const F = { '1-1': '春节', '1-15': '元宵节', '5-5': '端午节', '7-7': '七夕',
+    '7-15': '中元节', '8-15': '中秋节', '9-9': '重阳节', '12-8': '腊八节' };
+  if (F[`${l.month}-${l.day}`]) return F[`${l.month}-${l.day}`];
+  return (l.month === 12 && l.day === monthDaysOf(l.year, 12)) ? '除夕' : null;
+}
+/* 格子里那行小字：节气（调用方自己先问）> 传统节日 > 农历日期。
+   初一显示月份名（「八月」）而不是「初一」—— 那天写月份才知道这月从哪儿开始。 */
+const lunarCellLabel = (ts) => {
+  const l = lunarOf(ts);
+  if (l === null) return '';
+  return lunarFestival(l) ?? (l.day === 1 ? l.monthName : l.dayName);
+};
+
+/* ── 二十四节气：Meeus 低精度太阳黄经 + 牛顿迭代，没有常数表、没有例外表 ──
+   寿星公式那套「[Y×D+C]−L」抄错一位常数，错的是某一年某一个节气的一天，
+   而那种错在界面上看起来完全正常。节气定义只有一句话：视黄经每走 15° 一个。
+   日期按**北京时间**定（东八区决定它落在哪天），与这台机器在哪个时区无关。 */
+const SOLAR_TERMS = ['小寒', '大寒', '立春', '雨水', '惊蛰', '春分', '清明', '谷雨',
+  '立夏', '小满', '芒种', '夏至', '小暑', '大暑', '立秋', '处暑', '白露', '秋分',
+  '寒露', '霜降', '立冬', '小雪', '大雪', '冬至'];
+const rad = (d) => (d * Math.PI) / 180;
+function sunLongitude(jd) {
+  const t = (jd - 2451545.0) / 36525;
+  const l0 = 280.46646 + 36000.76983 * t + 0.0003032 * t * t;
+  const m = 357.52911 + 35999.05029 * t - 0.0001537 * t * t;
+  const c = (1.914602 - 0.004817 * t - 0.000014 * t * t) * Math.sin(rad(m))
+    + (0.019993 - 0.000101 * t) * Math.sin(rad(2 * m)) + 0.000289 * Math.sin(rad(3 * m));
+  const omega = 125.04 - 1934.136 * t;
+  return (((l0 + c - 0.00569 - 0.00478 * Math.sin(rad(omega))) % 360) + 360) % 360;
+}
+function julianDay(y, m, d) {
+  const yy = m <= 2 ? y - 1 : y, mm = m <= 2 ? m + 12 : m;
+  const a = Math.floor(yy / 100), b = 2 - a + Math.floor(a / 4);
+  return Math.floor(365.25 * (yy + 4716)) + Math.floor(30.6001 * (mm + 1)) + d + b - 1524.5;
+}
+function beijingOf(jd) {
+  const d = new Date((jd - 2440587.5) * DAY + 8 * 3600000);
+  return { key: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+    clock: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}` };
+}
+function termJulianDay(year, index) {
+  const target = (285 + 15 * index) % 360;
+  let jd = julianDay(year, 1, 5) + index * 15.218;
+  for (let i = 0; i < 12; i++) {
+    const diff = ((target - sunLongitude(jd) + 540) % 360) - 180;
+    if (Math.abs(diff) < 1e-7) break;
+    jd += diff / 0.98564736;
+  }
+  return jd;
+}
+const termCache = new Map();
+function solarTermsOf(year) {
+  if (termCache.has(year)) return termCache.get(year);
+  const out = SOLAR_TERMS.map((name, index) => ({ name, ...beijingOf(termJulianDay(year, index)) }));
+  termCache.set(year, out);
+  return out;
+}
+const termOnDay = (ts) => { const k = ymd(new Date(ts)); return solarTermsOf(new Date(ts).getFullYear()).find((t) => t.key === k) ?? null; };
+
+/* ── 放假安排（真数据，不是编的）─────────────────────────────────────
+   逐条对着《国务院办公厅关于 2026 年部分节假日安排的通知》抄，与
+   src/shared/holiday.ts 同一份。2027 年的安排要等 2026 年 10 月底才公布，
+   所以这里**没有 2027** —— 没公布的年份不许按规则推一个日期，用户会照着去请假。 */
+const LATEST_KNOWN_YEAR = 2026;
+const HOLIDAY_RUNS = [
+  { name: '元旦', from: '2026-01-01', to: '2026-01-03' },
+  { name: '春节', from: '2026-02-15', to: '2026-02-23' },
+  { name: '清明节', from: '2026-04-04', to: '2026-04-06' },
+  { name: '劳动节', from: '2026-05-01', to: '2026-05-05' },
+  { name: '端午节', from: '2026-06-19', to: '2026-06-21' },
+  { name: '中秋节', from: '2026-09-25', to: '2026-09-27' },
+  { name: '国庆节', from: '2026-10-01', to: '2026-10-07' },
+];
+/* 调休上班的那几天，记的是「为哪个节上的班」 */
+const HOLIDAY_WORKDAYS = new Map([
+  ['2026-01-04', '元旦'], ['2026-02-14', '春节'], ['2026-02-28', '春节'],
+  ['2026-05-09', '劳动节'], ['2026-09-20', '国庆节'], ['2026-10-10', '国庆节'],
+]);
+const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const fromYmd = (s) => { const [y, m, dd] = s.split('-').map(Number); return new Date(y, m - 1, dd); };
+
+/* ── 农历 / 节气 / 休班：三张真表摊平成按天查的映射（与 holiday.ts 的 markMap 同法，
+   月历一屏要问 42 次）────────────────────────────────────────────────── */
+const MARKS = new Map();
+for (const r of HOLIDAY_RUNS) {
+  for (let ts = fromYmd(r.from).getTime(); ts <= fromYmd(r.to).getTime(); ts = addDays(ts, 1)) {
+    MARKS.set(ymd(new Date(ts)), { kind: 'holiday', name: r.name });
+  }
+}
+for (const [day, name] of HOLIDAY_WORKDAYS) MARKS.set(day, { kind: 'adjusted-work', name });
+/* 假日与周末分开、调休上班也不算工作日：前者关系能不能安排出行，后者是一年中最容易
+   被忘掉的日子。没数据的年份按周六周日判周末。 */
+function dayMarkOf(ts) {
+  const hit = MARKS.get(ymd(new Date(ts)));
+  if (hit) return hit;
+  const wd = new Date(ts).getDay();
+  return { kind: (wd === 0 || wd === 6) ? 'weekend' : 'workday', name: null };
+}
+/* 这天落在哪个放假段的第几天（明细面板那颗「第 2/3 天」） */
+function holidayPositionOf(ts) {
+  const at = dayIndex(ts);
+  for (const r of HOLIDAY_RUNS) {
+    const start = dayIndex(fromYmd(r.from).getTime()), end = dayIndex(fromYmd(r.to).getTime());
+    if (at >= start && at <= end) return { name: r.name, index: at - start + 1, span: end - start + 1 };
+  }
+  return null;
+}
+const makeupFor = (ts) => (MARKS.get(ymd(new Date(ts)))?.kind === 'adjusted-work' ? MARKS.get(ymd(new Date(ts))).name : null);
+const restLabel = (wd) => (wd === 0 || wd === 6 ? '周末' : '工作日');
+/* 「这一年为什么没有休 / 班」的一句话，两种成因得分清说：将来的年份是**还没公布**，
+   2024 之前是这份表**没收录**。合起来说成「未公布」会让 2023 看起来像还没定。 */
+const FIRST_KNOWN_YEAR = 2024;
+const coverageNote = (year) => year >= FIRST_KNOWN_YEAR && year <= LATEST_KNOWN_YEAR ? null
+  : (year < FIRST_KNOWN_YEAR
+    ? `${year} 年的放假安排没有收录，这一年只标周末（数据从 ${FIRST_KNOWN_YEAR} 年起）`
+    : `${year} 年的放假安排还没公布，这一年只标周末（已公布到 ${LATEST_KNOWN_YEAR} 年）`);
+
+/* 每段假期算出三件事：共几天、还有几天、今天是不是正落在里面。
+   indexInRun 非 null 就是「正在进行中」—— 十月三日打开倒计时，国庆节还应该在最上面，
+   而不是跳到下一个假期，所以这一段不能被「还有 -2 天」那种数说出来。 */
+const RUNS = HOLIDAY_RUNS.map((r) => {
+  const from = fromYmd(r.from); const to = fromYmd(r.to);
+  return { name: r.name, from, to, span: Math.round((to - from) / DAY) + 1 };
+});
+/* upcomingHolidays：过完的那段直接跳过，正在进行中的那段 daysUntil 记 0，
+   然后按距离由近到远排。 */
+function upcomingHolidays(limit = 20) {
+  return RUNS.filter((r) => r.to >= today0).map((r) => ({
+    ...r,
+    daysUntil: Math.max(0, Math.round((r.from - today0) / DAY)),
+    indexInRun: today0 >= r.from && today0 <= r.to ? Math.round((today0 - r.from) / DAY) + 1 : null,
+  })).sort((a, b) => a.daysUntil - b.daysUntil || a.from - b.from).slice(0, limit);
+}
+/* 「10月1日—10月7日」/「1月1日」。跨月按真实日期写，不省略成「共 7 天」那种含糊话 */
+const spanLabel = (r) => {
+  const a = `${r.from.getMonth() + 1}月${r.from.getDate()}日`;
+  const b = `${r.to.getMonth() + 1}月${r.to.getDate()}日`;
+  return a === b ? a : `${a}—${b}`;
+};
+const nextHoliday = upcomingHolidays(1)[0] ?? null;
+/* 设置里「只看」那一档（默认一年，shared/defaults.ts）。取全量再分两堆：
+   只留过滤结果的话，界面就分不清「最近的假期还在范围外」和「这一年还没公布」，
+   而把前者说成后者是在说假话 —— 数据就在那儿，只是没显示。 */
+const HORIZON = 365;
+const ALL_HOLIDAYS = upcomingHolidays();
+const SHOWN_HOLIDAYS = ALL_HOLIDAYS.filter((h) => h.daysUntil <= HORIZON);
+const BEYOND_HOLIDAYS = ALL_HOLIDAYS.filter((h) => h.daysUntil > HORIZON);
+
+/* ── 纪念日：从锚点算「下一次是哪天」 ─────────────────────────────────
+   农历纪念日绕不开闰月：锚点落在闰六月时不能要求每年都有闰六月，所以只存
+   「第几个月」—— 闰六月十五的生日，平年就过六月十五。公历那一路走 clampDay，
+   2 月 29 日记的生日在平年过 2 月 28 日，而不是凭空消失一年。 */
+const clampDay = (year, month1, day) => ({ month1, day: Math.min(day, new Date(year, month1, 0).getDate()) });
+const shortDate = (k) => `${Number(k.slice(5, 7))}月${Number(k.slice(8, 10))}日`;
+const fullDate = (k) => `${k.slice(0, 4)}年${Number(k.slice(5, 7))}月${Number(k.slice(8, 10))}日`;
+function anniversaryOccurrence(a) {
+  const anchorTs = fromYmd(a.date).getTime();
+  const today = dayIndex(now.getTime());
+  const sinceDays = today - dayIndex(anchorTs);
+  const lunarAnchor = a.lunar ? lunarOf(anchorTs) : null;
+  const lunarLabel = lunarAnchor === null ? null : `农历${lunarAnchor.label}`;
+  if (!a.yearly) {
+    /* 一次性：过了就是「已过 N 天」。它不会再发生，所以也永远不该被
+       「只看 N 天以内」藏掉 —— 挡住它就等于把用户记下的那天彻底抹了 */
+    return { at: a.date, daysLeft: sinceDays === 0 ? 0 : -sinceDays, years: null, sinceDays, lunarLabel };
+  }
+  /* 从本年往后找第一次不早于今天的发生日，最多找两年就够 ——
+     公历固定在一年内必然出现一次，农历最多差一个月（闰月） */
+  const [ay, am, ad] = a.date.split('-').map(Number);
+  for (let step = 0; step <= 2; step++) {
+    const year = now.getFullYear() + step;
+    let ts = null;
+    if (lunarAnchor !== null) ts = solarFromLunar(year, lunarAnchor.month, lunarAnchor.day);
+    else { const c = clampDay(year, am, ad); ts = new Date(year, c.month1 - 1, c.day).getTime(); }
+    if (ts === null) continue;
+    if (dayIndex(ts) >= today) {
+      return { at: ymd(new Date(ts)), daysLeft: dayIndex(ts) - today, years: year - ay, sinceDays, lunarLabel };
+    }
+  }
+  return null;
+}
+/* 按「还有几天」排，比的是**绝对值** —— 上个月刚过完的生日也该待在列表前面，
+   否则刚过完那几天它会沉到最底下。超过「只看」那一档的不列，但要说一句有几条。 */
+function collectAnniversaries() {
+  const sorted = ANNIVERSARIES.map((a) => ({ a, o: anniversaryOccurrence(a) }))
+    .filter((x) => x.o !== null)
+    .sort((p, q) => Math.abs(p.o.daysLeft) - Math.abs(q.o.daysLeft));
+  const kept = sorted.filter((x) => x.o.daysLeft <= HORIZON);
+  return { kept, hidden: sorted.length - kept.length };
+}
+/* 「10月11日 · 第 5 周年 · 农历八月三十 · 已 1826 天」—— 只留必要的几段 */
+function annSub({ a, o }) {
+  const parts = [a.yearly ? shortDate(a.date) : fullDate(a.date)];
+  if (o.years !== null) parts.push(o.years === 0 ? '今年' : `第 ${o.years} 周年`);
+  if (o.lunarLabel !== null) parts.push(o.lunarLabel);
+  if (a.yearly && o.sinceDays > 0) parts.push(`已 ${o.sinceDays} 天`);
+  return parts.join(' · ');
+}
+
+const open = () => TASKS.filter((t) => !t.done && !t.doneAt);
+const isOverdue = (t) => t.kind === 'deadline' && !t.done && !t.doneAt && t.day < 0;
+const urgency = (t) => {
+  if (isOverdue(t)) return 'overdue';
+  if (!t.time) return '';
+  const [h, m] = t.time.split(':').map(Number);
+  const mins = h * 60 + m - (now.getHours() * 60 + now.getMinutes());
+  return t.day === 0 && mins >= 0 && mins <= 60 ? 'soon' : '';
+};
+/* 相对日：±7 天内说「今天 / 明天 / 后天 / 昨天 / 前天 / N 天后 / N 天前」，
+   超出就回「10月21日 周三」（与 shared/calendar.ts 的 relativeDayLabel 同一口径）。 */
+const dayLabel = (d) => {
+  const diff = Math.round((d - today0) / DAY);
+  const rel = { 0: '今天', 1: '明天', 2: '后天', [-1]: '昨天', [-2]: '前天' }[diff]
+    ?? (diff > 2 && diff <= 7 ? `${diff} 天后` : (diff < -2 && diff >= -7 ? `${-diff} 天前` : null));
+  return rel ?? `${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAYS[d.getDay()]}`;
+};
+
+/* ── 行 ─────────────────────────────────────────────────────────────── */
+function rowHTML(t, opts = {}) {
+  const settled = !!t.doneAt || t.done;
+  const cls = ['row'];
+  if (t.important) cls.push('row--important');
+  if (settled && opts.strike) cls.push('row--settled');
+  if (opts.cursor) cls.push('row--cursor');
+  const urg = urgency(t);
+  const clockText = settled ? (t.doneAt ?? '') : (t.time ?? '');
+  return `<li class="${cls.join(' ')}"${urg ? ` data-urgency="${urg}"` : ''} data-id="${t.id}">
+    <span class="row__cursor"></span>
+    <span class="row__clock">${clockText}</span>
+    <span class="row__tick"></span>
+    <button class="row__dot${settled ? ' row__dot--on' : ''}" type="button"
+      aria-label="${settled ? '取消完成' : '完成'}「${esc(t.title)}」" data-done="${t.id}"></button>
+    <span class="row__title" data-edit="${t.id}"><span class="row__title-text">${esc(t.title)}</span></span>
+    ${t.streak ? `<span class="row__streak">连续 ${t.streak} 天</span>` : ''}
+    ${opts.today ? '<span class="row__today">今天做</span>' : ''}
+    ${opts.undo ? '<button class="row__undo" type="button">撤销</button>' : ''}
+    <button class="row__more" type="button" aria-label="更多操作" aria-haspopup="menu" data-menu="${t.id}">⋮</button>
+  </li>`;
+}
+const fill = (id, list, opts) => {
+  const el = document.getElementById(id);
+  el.innerHTML = list.length
+    ? list.map((t) => rowHTML(t, opts)).join('')
+    : `<li class="empty empty--tight">${esc(opts.empty)}<div class="empty__hint">${esc(opts.hint)}</div></li>`;
+};
+
+function renderBoard() {
+  const o = open();
+  const overdue = o.filter(isOverdue);
+  const next = o.filter((t) => t.kind === 'deadline' && t.day === 0 && !t.allDay).sort((a, b) => a.time.localeCompare(b.time));
+  const anytime = o.filter((t) => t.kind === 'deadline' && t.day === 0 && t.allDay);
+  const daily = o.filter((t) => t.kind === 'recurring');
+  fill('sec-overdue', overdue, { empty: '没有逾期', hint: '逾期会自己置顶' });
+  fill('sec-next', next, { empty: '今天都办完了', hint: '「+」记一件新的事' });
+  fill('sec-anytime', anytime, { empty: '今天没有随时做的事', hint: '全天型的事排在这里' });
+  fill('sec-daily', daily, { empty: '还没有每天要做的事', hint: '周期任务只有打卡，没有历史' });
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  set('cnt-overdue', overdue.length); set('cnt-next', next.length);
+  set('cnt-anytime', anytime.length); set('cnt-daily', daily.length);
+  set('ro-late', overdue.length); set('ro-left', next.length + anytime.length + daily.length);
+  set('cnt-inbox', TASKS.filter((t) => t.kind === 'someday').length);
+  set('cnt-future', o.filter((t) => t.kind === 'deadline' && t.day > 0).length);
+  set('cnt-done', TASKS.filter((t) => t.doneAt || t.done).length);
+  document.getElementById('ro-now').textContent = clock(now);
+  document.getElementById('dl-month').textContent = `${now.getMonth() + 1}月`;
+  document.getElementById('dl-day').textContent = now.getDate();
+  document.getElementById('dl-dow').textContent = WEEKDAYS[now.getDay()];
+}
+
+function renderLedgers() {
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  fill('sec-inbox', TASKS.filter((t) => t.kind === 'someday'), { empty: '收件箱是空的', hint: '还没想好什么时候做的事，先记在这儿', today: true });
+
+  const future = open().filter((t) => t.kind === 'deadline' && t.day > 0).sort((a, b) => a.day - b.day);
+  const byDay = new Map();
+  future.forEach((t) => byDay.set(t.day, [...(byDay.get(t.day) ?? []), t]));
+  document.getElementById('future-body').innerHTML = future.length
+    ? [...byDay].map(([d, list]) => `<section class="section">
+        <h2 class="section__label" style="padding-left:var(--space-3)">${dayLabel(dayAt(d))}<span class="section__count">${list.length}</span></h2>
+        <ul class="rows">${list.map((t) => rowHTML(t)).join('')}</ul></section>`).join('')
+    : '<div class="empty">以后是空的<div class="empty__hint">明天及以后要截止的事会排在这里</div></div>';
+
+  /* 已完成是一本单独的账：按「完成日」分组（不是截止日），同一天里完成时刻倒序。
+     周期任务没有历史，所以单独成段叫「每天」，不能按完成日塞进流水里。 */
+  const done = TASKS.filter((t) => t.doneAt)
+    .sort((a, b) => b.doneDay - a.doneDay || b.doneAt.localeCompare(a.doneAt));
+  const doneByDay = new Map();
+  done.forEach((t) => doneByDay.set(t.doneDay, [...(doneByDay.get(t.doneDay) ?? []), t]));
+  document.getElementById('done-body').innerHTML = done.length
+    ? [...doneByDay].map(([d, list]) => `<section class="section">
+        <h2 class="section__label" style="padding-left:var(--space-3)">${dayLabel(dayAt(d))}<span class="section__count">${list.length}</span></h2>
+        <ul class="rows">${list.map((t) => rowHTML(t, { strike: true })).join('')}</ul></section>`).join('') +
+      `<section class="section"><h2 class="section__label" style="padding-left:var(--space-3)">每天<span class="section__count">2</span></h2>
+        <ul class="rows">${TASKS.filter((t) => t.kind === 'recurring').slice(0, 2)
+          .map((t) => rowHTML({ ...t, doneAt: t.time, done: true }, { strike: true })).join('')}</ul></section>`
+    : '<div class="empty">还没有做完的事<div class="empty__hint">在今天那张看板上勾掉一件，它就会存在这里</div></div>';
+
+  set('cnt-inbox-2', TASKS.filter((t) => t.kind === 'someday').length + ' 件');
+  set('cnt-future-2', future.length + ' 件');
+  set('cnt-done-2', done.length + ' 件');
+}
+
+/* ── 日历 ───────────────────────────────────────────────────────────── */
+let calRef = { year: now.getFullYear(), month1: now.getMonth() + 1 };
+/* 选中日按 dayKey 记，不按「几号」—— 否则翻到上个月会莫名选中上个月的同一天 */
+let calSel = ymd(today0);
+
+function monthCells(y, m1) {
+  const first = new Date(y, m1 - 1, 1);
+  const lead = (first.getDay() + 6) % 7;                 // 周一起始
+  const count = new Date(y, m1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < Math.ceil((lead + count) / 7) * 7; i++) {
+    const d = new Date(y, m1 - 1, i - lead + 1);
+    cells.push({ date: d, inMonth: d.getMonth() === m1 - 1 });
+  }
+  return cells;
+}
+function agendaOf(d) {
+  const diff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - today0) / DAY);
+  /* 周期任务不进过去的日子、也不进圆点：它没有历史，铺到上周就是替用户编一份
+     「那天你没做」的流水；而一条「每天」的习惯会把整月每一格都点上。今天那格例外。 */
+  const list = open().filter((t) => t.kind !== 'someday' && (t.kind === 'recurring' ? diff === 0 : t.day === diff));
+  const dated = list.filter((t) => t.kind !== 'recurring');
+  return { pending: dated.length, late: dated.some(isOverdue), list };
+}
+function renderCalendar() {
+  document.getElementById('cal-dows').innerHTML = CAL_HEADERS.map((l, i) =>
+    `<span class="cal__dow${i > 4 ? ' cal__dow--rest' : ''}">${l}</span>`).join('');
+  document.getElementById('cal-title').textContent = `${calRef.year} 年 ${CN_MONTHS[calRef.month1 - 1]}`;
+  const todayKey = ymd(today0);
+  document.getElementById('monthgrid').innerHTML = monthCells(calRef.year, calRef.month1).map(({ date, inMonth }) => {
+    const ts = date.getTime();
+    const key = ymd(date);
+    const mark = dayMarkOf(ts);
+    const term = termOnDay(ts);
+    /* 优先级：节气 > 传统节日 > 农历日。初一显示月份名（「八月」），
+       那天写月份才知道这个月是从哪儿开始的。 */
+    const label = term?.name ?? lunarCellLabel(ts);
+    const cls = ['monthcell'];
+    if (!inMonth) cls.push('monthcell--out');
+    if (mark.kind === 'holiday') cls.push('monthcell--rest');
+    if (mark.kind === 'adjusted-work') cls.push('monthcell--work');
+    const ag = agendaOf(date);
+    if (ag.late) cls.push('monthcell--late');
+    if (key === todayKey) cls.push('monthcell--today');
+    if (key === calSel) cls.push('monthcell--on');
+    return `<button class="${cls.join(' ')}" type="button" data-cell="${key}"
+        aria-current="${key === todayKey ? 'date' : 'false'}"
+        aria-label="${WEEKDAYS[date.getDay()]}${date.getDate()} 日${label === '' ? '' : ` ${label}`}">
+      <span class="monthcell__top">
+        ${mark.kind === 'holiday' ? '<span class="monthcell__badge">休</span>' : ''}
+        ${mark.kind === 'adjusted-work' ? '<span class="monthcell__badge monthcell__badge--work">班</span>' : ''}
+        <span class="monthcell__day">${date.getDate()}</span>
+      </span>
+      <span class="monthcell__label${term === null ? '' : ' monthcell__label--term'}">${label}</span>
+      ${ag.pending ? `<span class="monthcell__dots" data-late="${ag.late ? 1 : 0}">${
+        Array.from({ length: Math.min(3, ag.pending) }, () => '<span class="monthdot"></span>').join('')
+      }${ag.pending > 3 ? `<span class="monthcell__more">${ag.pending}</span>` : ''}</span>` : ''}
+    </button>`;
+  }).join('');
+  /* 翻到没数据的年份要解释「为什么一个休 / 班都没有」，而不是让用户以为这年不用上班 */
+  const note = coverageNote(calRef.year);
+  const noteEl = document.getElementById('cal-coverage');
+  noteEl.hidden = note === null;
+  if (note !== null) noteEl.textContent = note;
+  /* 底栏那颗永远说「下一个假期」：正在进行中的那段说「第 N 天」，不说「还有 -1 天」 */
+  document.getElementById('cal-next-holiday').textContent = nextHoliday === null ? '倒计时'
+    : `倒计时 · ${nextHoliday.name}${nextHoliday.indexInRun === null
+      ? ` ${nextHoliday.daysUntil} 天后` : ` 第 ${nextHoliday.indexInRun} 天`}`;
+  renderDayCard();
+}
+function renderDayCard() {
+  const d = fromYmd(calSel);
+  const ts = d.getTime();
+  const ag = agendaOf(d);
+  const pos = holidayPositionOf(ts);
+  const makeup = makeupFor(ts);
+  const term = termOnDay(ts);
+  const lunar = lunarOf(ts);
+  document.getElementById('daycard').innerHTML = `
+    <header class="daycard__head"><div class="daycard__line">
+      <span class="daycard__date">${d.getMonth() + 1} 月 ${d.getDate()} 日</span>
+      <span class="daycard__dow">${WEEKDAYS[d.getDay()]}</span>
+      ${pos ? `<span class="daycard__chip">${pos.name} 第 ${pos.index}/${pos.span} 天</span>` : ''}
+      ${makeup ? `<span class="daycard__chip">调休上班 · 为${makeup}</span>` : ''}
+    </div><div class="daycard__meta">
+      ${lunar ? `<span>农历${lunar.label}</span>` : ''}
+      ${term ? `<span>${term.name} ${term.clock}</span>` : ''}
+      ${pos === null && makeup === null ? `<span>${restLabel(d.getDay())}</span>` : ''}
+    </div></header>
+    ${ag.list.length
+      ? `<ul class="rows">${ag.list.map((t) => rowHTML(t)).join('')}</ul>`
+      : '<div class="daycard__empty">这天没有安排</div>'}
+    <div class="daycard__foot"><button class="daycard__add" type="button" data-goto="edit">+ 在这天记一件</button></div>`;
+}
+
+/* ── 倒计时 ─────────────────────────────────────────────────────────── */
+/* 天数文案三档：「还有 N 天」/「就是今天」/「已过 N 天」（负数只可能出现在
+   一次性纪念日上）。到了那天是实心片，不是变红 —— 今天不是「晚了」。 */
+const daysLeftLabel = (n) => (n === 0 ? '就是今天' : n > 0 ? `还有 ${n} 天` : `已过 ${-n} 天`);
+let annKept = [];
+function renderCountdown() {
+  const hero = SHOWN_HOLIDAYS[0] ?? null;
+  const heroEl = document.getElementById('cd-hero');
+  if (hero === null) {
+    /* 「空」有两种成因，必须分开说：一种是数据就在那儿只是被范围挡住了，
+       一种是这一年压根还没公布。混成一句「还没公布」是在说假话。 */
+    heroEl.innerHTML = BEYOND_HOLIDAYS.length > 0
+      ? `<div class="cal__note">最近的假期要 ${BEYOND_HOLIDAYS[0].daysUntil} 天后，被「只看 ${HORIZON} 天以内」挡住了<button class="linkbutton cal__note-link" type="button" data-goto="settings">去设置里放宽</button></div>`
+      : `<div class="cal__note">${LATEST_KNOWN_YEAR + 1} 年的放假安排还没公布，这里只说到 ${LATEST_KNOWN_YEAR} 年 —— 国务院一般每年 10 月底发通知，公布了升一次版本就有</div>`;
+  } else {
+    heroEl.innerHTML = `<section class="hero">
+      <div class="hero__label">${hero.indexInRun === null ? '最近的假期' : '正在放假'}</div>
+      <div class="hero__name">${hero.name}</div>
+      <div class="hero__days">${hero.indexInRun === null
+        ? `<span class="hero__num">${hero.daysUntil}</span><span class="hero__unit">天后</span>`
+        : `<span class="hero__unit">今天是第</span><span class="hero__num">${hero.indexInRun}</span><span class="hero__unit">天</span>`}</div>
+      <div class="hero__sub">${spanLabel(hero)} · 共 ${hero.span} 天</div>
+    </section>`;
+  }
+  /* 大读数那一块已经把第一段讲完了，下面只列更远的（slice(1)） */
+  const rest = SHOWN_HOLIDAYS.slice(1);
+  document.getElementById('cd-holiday-label').hidden = rest.length === 0;
+  document.getElementById('holiday-list').innerHTML = rest.map((h) => `
+    <li class="crow"><div class="crow__line"><span class="crow__title">${h.name}</span>
+      <span class="crow__days">${daysLeftLabel(h.daysUntil)}</span></div>
+      <div class="crow__sub">${spanLabel(h)} · 共 ${h.span} 天</div></li>`).join('');
+
+  const { kept, hidden } = collectAnniversaries();
+  annKept = kept;
+  document.getElementById('ann-list').innerHTML = kept.length === 0
+    ? '<li class="empty empty--tight">还没有纪念日<div class="empty__hint">点右上角的「+」记一个生日或纪念日，这里天天给你数</div></li>'
+    : kept.map((x, i) => `
+      <li class="crow"><button class="crow__hit" type="button" data-ann="${i}" aria-label="改一改${esc(x.a.title)}">
+        <span class="crow__line"><span class="crow__title">${esc(x.a.title)}</span>
+          <span class="crow__days" data-today="${x.o.daysLeft === 0 ? 1 : 0}">${daysLeftLabel(x.o.daysLeft)}</span></span>
+        <span class="crow__sub">${esc(annSub(x))}</span></button></li>`).join('');
+  document.getElementById('cd-hidden').innerHTML = hidden > 0
+    ? `<div class="cal__note">还有 ${hidden} 条更远的没显示<button class="linkbutton cal__note-link" type="button" data-goto="settings">去设置里放宽</button></div>`
+    : '';
+}
+
+/* ── 视图切换 ───────────────────────────────────────────────────────── */
+const views = [...document.querySelectorAll('.view')];
+function show(name) {
+  views.forEach((v) => v.classList.toggle('view--on', v.dataset.view === name));
+  document.querySelectorAll('#nav .navlist__item').forEach((b) =>
+    b.setAttribute('aria-current', String(b.dataset.goto === name)));
+  closeMenu();
+  document.querySelector('.board')?.scrollTo(0, 0);
+}
+document.addEventListener('click', (e) => {
+  const nav = e.target.closest('[data-goto]');
+  if (nav) { show(nav.dataset.goto); }
+
+  const done = e.target.closest('[data-done]');
+  if (done) {
+    const t = TASKS.find((x) => x.id === done.dataset.done);
+    if (t) {
+      const li = done.closest('.row');
+      /* 只翻一次状态：勾上 → 记完成时刻并退出今天；收回 → 清掉完成时刻回到今天。
+         文案在翻之前算，否则读到的已是翻完的值。 */
+      const willDone = !t.done && !t.doneAt;
+      li.classList.add('row--exiting');
+      setTimeout(() => {
+        if (willDone) { t.doneDay = 0; t.doneAt = clock(new Date()); } else { delete t.doneAt; }
+        renderAll();
+      }, 220);
+      flash(willDone ? '已记下' : '已收回今天');
+    }
+  }
+  const cell = e.target.closest('[data-cell]');
+  if (cell) { calSel = cell.dataset.cell; renderCalendar(); }
+  if (!e.target.closest('.rowmenu') && !e.target.closest('[data-menu]')) closeMenu();
+});
+
+/* ── 行菜单（position: fixed，所以行不能带 transform） ─────────────── */
+const menu = document.createElement('div');
+menu.className = 'rowmenu';
+menu.setAttribute('role', 'menu');
+menu.hidden = true;
+document.body.appendChild(menu);
+function closeMenu() { menu.hidden = true; }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-menu]');
+  if (!b) return;
+  const t = TASKS.find((x) => x.id === b.dataset.menu);
+  const remindable = t.kind !== 'someday';
+  /* 清单池没有日期承诺，所以它没有「推迟 / 推到明天」—— 只有「今天做」和「编辑」。 */
+  menu.innerHTML = (remindable
+    ? ['完成', '推迟 10 分钟', '推到明天', '编辑'].map((l) => `<button class="rowmenu__item" role="menuitem" type="button" data-act="${l}">${l}</button>`).join('')
+    : ['今天做', '编辑'].map((l) => `<button class="rowmenu__item" role="menuitem" type="button" data-act="${l}">${l}</button>`).join(''))
+    + '<button class="rowmenu__item rowmenu__item--danger" role="menuitem" type="button" data-act="删除">删除</button>';
+  menu.dataset.target = t.id;
+  const r = b.getBoundingClientRect();
+  /* 先量自己的实际尺寸再定位，别把宽高写死成数 —— 窄窗里菜单不该被切掉。 */
+  menu.hidden = false;
+  menu.style.left = Math.max(4, Math.min(r.left, innerWidth - menu.offsetWidth - 4)) + 'px';
+  menu.style.top = Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - 4) + 'px';
+  b.setAttribute('aria-expanded', 'true');
+  menu.querySelector('button')?.focus();
+});
+menu.addEventListener('click', (e) => {
+  const item = e.target.closest('[data-act]');
+  if (!item) return;
+  const t = TASKS.find((x) => x.id === menu.dataset.target);
+  closeMenu();
+  if (!t) return;
+  switch (item.dataset.act) {
+    case '完成': t.doneDay = 0; t.doneAt = clock(new Date()); renderAll(); flash('已记下'); break;
+    case '推迟 10 分钟': flash('已推迟 10 分钟'); break;
+    case '推到明天': t.day += 1; renderAll(); flash('已推到明天'); break;
+    case '今天做': t.kind = 'deadline'; t.day = 0; renderAll(); flash('已移到今天'); break;
+    case '编辑': show('edit'); break;
+    case '删除': flash('已删掉 · 5 秒内可撤销'); break;
+  }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMenu(); document.getElementById('miniwin').hidden = true; } });
+
+/* ── flash ──────────────────────────────────────────────────────────── */
+let flashTimer = null;
+function flash(text) {
+  const f = document.getElementById('flash');
+  f.querySelector('.flash__inner').textContent = text;
+  f.hidden = false;
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { f.hidden = true; }, 1800);
+}
+document.getElementById('edit-save').addEventListener('click', () => { flash('已记下'); show('board'); });
+
+/* ── 主题 ───────────────────────────────────────────────────────────── */
+const device = document.getElementById('device');
+function setTheme(t) {
+  device.dataset.theme = t;
+  const btn = document.getElementById('theme-btn');
+  btn.setAttribute('aria-label', t === 'dark' ? '切到浅色' : '切到深色');
+  btn.title = btn.getAttribute('aria-label');
+  document.querySelectorAll('#theme-seg .segmented__item').forEach((b) =>
+    b.classList.toggle('segmented__item--on', b.dataset.theme === t));
+}
+document.getElementById('theme-btn').addEventListener('click', () =>
+  setTheme(device.dataset.theme === 'dark' ? 'light' : 'dark'));
+document.querySelectorAll('#theme-seg .segmented__item').forEach((b) =>
+  b.addEventListener('click', () => setTheme(b.dataset.theme)));
+
+/* ── 编辑器：类型 / 频率切换、日期与时刻浮层 ───────────────────────── */
+document.getElementById('kind-seg').addEventListener('click', (e) => {
+  const b = e.target.closest('.segmented__item'); if (!b) return;
+  [...e.currentTarget.children].forEach((x) => x.classList.toggle('segmented__item--on', x === b));
+  document.querySelectorAll('[data-kind-block]').forEach((el) => { el.hidden = el.dataset.kindBlock !== b.dataset.kind; });
+});
+const FREQ_UNIT = { daily: '天', weekly: '周', monthly: '个月' };
+document.getElementById('freq-seg').addEventListener('click', (e) => {
+  const b = e.target.closest('.segmented__item'); if (!b) return;
+  [...e.currentTarget.children].forEach((x) => x.classList.toggle('segmented__item--on', x === b));
+  document.getElementById('freq-unit').textContent = FREQ_UNIT[b.dataset.freq];
+  document.querySelectorAll('[data-freq-block]').forEach((el) => { el.hidden = el.dataset.freqBlock !== b.dataset.freq; });
+});
+document.getElementById('monthdays').innerHTML = Array.from({ length: 31 }, (_, i) =>
+  `<button class="daygrid__item${i + 1 === now.getDate() ? ' daygrid__item--on' : ''}" type="button">${i + 1}</button>`).join('');
+
+document.getElementById('date-toggle').addEventListener('click', () => {
+  const p = document.getElementById('date-pop');
+  p.hidden = !p.hidden;
+  document.getElementById('time-pop').hidden = true;
+});
+document.getElementById('time-toggle').addEventListener('click', () => {
+  const p = document.getElementById('time-pop');
+  p.hidden = !p.hidden;
+  document.getElementById('date-pop').hidden = true;
+});
+document.getElementById('pop-dows').innerHTML = CAL_HEADERS.map((l, i) =>
+  `<span class="cal__dow${i > 4 ? ' cal__dow--rest' : ''}">${l}</span>`).join('');
+document.getElementById('pop-grid').innerHTML = monthCells(now.getFullYear(), now.getMonth() + 1).map(({ date, inMonth }) => {
+  const isToday = date.toDateString() === now.toDateString();
+  return `<button class="cal__cell${!inMonth ? ' cal__cell--out' : ''}${isToday ? ' cal__cell--today' : ''}${isToday ? ' cal__cell--on' : ''}" type="button">${date.getDate()}</button>`;
+}).join('');
+document.getElementById('pick-h').innerHTML = Array.from({ length: 24 }, (_, h) =>
+  `<button class="timepick__cell${h === 17 ? ' timepick__cell--on' : ''}" type="button">${pad(h)}</button>`).join('');
+document.getElementById('pick-m').innerHTML = Array.from({ length: 12 }, (_, i) =>
+  `<button class="timepick__cell${i === 0 ? ' timepick__cell--on' : ''}" type="button">${pad(i * 5)}</button>`).join('');
+
+/* ── 其余交互 ───────────────────────────────────────────────────────── */
+document.getElementById('cal-prev').addEventListener('click', () => { calRef.month1--; if (calRef.month1 < 1) { calRef.month1 = 12; calRef.year--; } renderCalendar(); });
+document.getElementById('cal-next').addEventListener('click', () => { calRef.month1++; if (calRef.month1 > 12) { calRef.month1 = 1; calRef.year++; } renderCalendar(); });
+document.getElementById('cal-today').addEventListener('click', () => { calRef = { year: now.getFullYear(), month1: now.getMonth() + 1 }; calSel = ymd(today0); renderCalendar(); });
+document.getElementById('ann-toggle').addEventListener('click', () => { const f = document.getElementById('annform'); f.hidden = !f.hidden; if (!f.hidden) openAnnForm(null); });
+document.getElementById('ann-close').addEventListener('click', () => { document.getElementById('annform').hidden = true; });
+
+/* ── 加纪念日那张表单：字段跟着「怎么重复」变 ───────────────────────── */
+const ANN_DEFAULT_DATE = '2001-08-30';
+let annDateKey = ANN_DEFAULT_DATE;
+let annLunar = null;
+/* 农历那行小字是算出来的，不是抄的 —— 用户改日期时它就是这条记录的真实农历日 */
+function setAnnDate(key) {
+  annDateKey = key;
+  const d = fromYmd(key);
+  annLunar = lunarOf(d.getTime());
+  document.getElementById('ann-date').textContent = key;
+  document.getElementById('ann-date-dow').textContent = WEEKDAYS[d.getDay()];
+  document.getElementById('ann-lunar-unit').textContent = annLunar === null ? '' : `农历${annLunar.label}`;
+}
+/* 「按哪个历」只在「每年都数」时才存在 —— 一次性的日子没有「每年按哪个历」可问 */
+function syncAnnForm() {
+  const yearly = document.getElementById('ann-yearly').checked;
+  const lunarEl = document.getElementById('ann-lunar');
+  document.getElementById('ann-lunar-field').hidden = !yearly;
+  if (!yearly) lunarEl.checked = false;   // 一次性的日子没有「每年按哪个历」可问
+  const on = yearly && lunarEl.checked;
+  document.getElementById('ann-repeat-hint').textContent = !yearly ? '只数这一天，过完就不再出现'
+    : (!on || annLunar === null) ? '每年到这一天倒数'
+    : `每年到农历${annLunar.label}那天倒数${annLunar.isLeap ? '（这条记在闰月里，平年按同月同日过）' : ''}`;
+  document.getElementById('ann-notify-hint').hidden = !document.getElementById('ann-notify').checked;
+}
+['ann-yearly', 'ann-lunar', 'ann-notify'].forEach((id) =>
+  document.getElementById(id).addEventListener('change', syncAnnForm));
+/* 打开表单时分两种：加一条（没有「删掉这条」）和改一条（有）。改的时候把这条
+   现在的值填回去，否则一打开就是一条空白记录，点「保存」等于把它改了。 */
+function openAnnForm(a) {
+  annEditing = a;
+  annConfirm = false;
+  const del = document.getElementById('ann-del');
+  del.hidden = a === null;
+  del.textContent = '删掉这条';
+  document.getElementById('ann-save').textContent = a === null ? '记下' : '保存';
+  document.getElementById('ann-name').value = a === null ? '' : a.title;
+  document.getElementById('ann-yearly').checked = a === null ? true : a.yearly;
+  document.getElementById('ann-lunar').checked = a === null ? false : a.lunar;
+  document.getElementById('ann-notify').checked = a === null ? false : a.notify;
+  document.getElementById('ann-problem').hidden = true;
+  setAnnDate(a === null ? ANN_DEFAULT_DATE : a.date);
+  syncAnnForm();
+}
+setAnnDate(ANN_DEFAULT_DATE);
+syncAnnForm();
+let annEditing = null;
+let annConfirm = false;
+/* 点列表里那一行 = 改这条（不是加一条），所以「删掉这条」要现身 */
+document.getElementById('ann-list').addEventListener('click', (e) => {
+  const hit = e.target.closest('[data-ann]');
+  if (!hit) return;
+  const x = annKept[Number(hit.dataset.ann)];
+  if (x === undefined) return;
+  document.getElementById('annform').hidden = false;
+  openAnnForm(x.a);
+});
+document.getElementById('ann-save').addEventListener('click', () => {
+  /* 名字空着不给提交 —— 「存储只管形状，名字不能是空的是业务规则」，界面上先拒一次 */
+  if (document.getElementById('ann-name').value.trim() === '') {
+    document.getElementById('ann-problem').hidden = false;
+    return;
+  }
+  document.getElementById('annform').hidden = true;
+  flash(annEditing === null ? '已记下' : '已保存');
+});
+/* 两步确认：纪念日没有软删也没有撤销窗口，点一下就没了的按钮不该长得跟「保存」一样轻 */
+document.getElementById('ann-del').addEventListener('click', (e) => {
+  if (!annConfirm) { annConfirm = true; e.currentTarget.textContent = '再点一下确认删掉'; return; }
+  annConfirm = false;
+  document.getElementById('annform').hidden = true;
+  flash('已删掉');
+});
+document.getElementById('mini-toggle').addEventListener('click', () => { document.getElementById('miniwin').hidden = false; });
+document.getElementById('mini-close').addEventListener('click', () => { document.getElementById('miniwin').hidden = true; });
+addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea')) return;
+  if (e.key === 'n' || e.key === 'N') show('edit');
+});
+
+function renderAll() { renderBoard(); renderLedgers(); renderCalendar(); renderCountdown(); }
+renderAll();
+setInterval(() => { document.getElementById('ro-now').textContent = clock(new Date()); }, 30000);
+</script>
+</body>
+</html>
